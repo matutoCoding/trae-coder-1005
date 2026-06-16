@@ -31,7 +31,7 @@ import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import type { MaintenanceRecord, Equipment } from '../types'
-import { mockMaintenanceRecords, mockStations, mockEquipments } from '../mock/data'
+import { useApp } from '../store/AppContext'
 
 const { Option } = Select
 const { TextArea } = Input
@@ -39,8 +39,14 @@ const { RangePicker } = DatePicker
 const { TabPane } = Tabs
 
 const DeviceMaintenance = () => {
-  const [records, setRecords] = useState<MaintenanceRecord[]>(mockMaintenanceRecords)
-  const [equipments, setEquipments] = useState<Equipment[]>(mockEquipments)
+  const {
+    equipments,
+    maintenanceRecords,
+    stations,
+    addMaintenanceRecord,
+    updateMaintenanceRecord,
+    updateEquipment,
+  } = useApp()
   const [filterType, setFilterType] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<string>('')
   const [modalType, setModalType] = useState<'view' | 'add' | 'process'>('view')
@@ -83,7 +89,7 @@ const DeviceMaintenance = () => {
   }
 
   const getStationName = (stationId: string) => {
-    const station = mockStations.find(s => s.id === stationId)
+    const station = stations.find(s => s.id === stationId)
     return station?.name || stationId
   }
 
@@ -254,11 +260,11 @@ const DeviceMaintenance = () => {
       const newRecord: MaintenanceRecord = {
         ...values,
         startTime: formattedStartTime,
-        id: `MR-${String(records.length + 1).padStart(3, '0')}`,
+        id: `MR-${String(maintenanceRecords.length + 1).padStart(3, '0')}`,
         status: '待处理' as const,
         equipmentId: values.equipmentId || undefined,
       }
-      setRecords([newRecord, ...records])
+      addMaintenanceRecord(newRecord)
       message.success('工单创建成功')
       setModalVisible(false)
     })
@@ -272,39 +278,30 @@ const DeviceMaintenance = () => {
       const isCompleted = values.status === '已完成'
       const restoreStatus = values.restoreEquipmentStatus as '恢复正常' | '保留异常' | '仍需观察' | undefined
 
-      setRecords(records.map(r =>
-        r.id === currentRecord.id
-          ? {
-              ...r,
-              status: values.status || (currentRecord.status === '待处理' ? '处理中' as const : '已完成' as const),
-              result: values.result || r.result,
-              endTime: isCompleted ? nowStr : r.endTime,
-              restoreEquipmentStatus: isCompleted ? restoreStatus : undefined,
-            }
-          : r
-      ))
+      updateMaintenanceRecord(currentRecord.id, {
+        status: values.status || (currentRecord.status === '待处理' ? '处理中' as const : '已完成' as const),
+        result: values.result,
+        endTime: isCompleted ? nowStr : undefined,
+        restoreEquipmentStatus: isCompleted ? restoreStatus : undefined,
+      })
 
       if (isCompleted && currentRecord.equipmentId) {
         const equipmentId = currentRecord.equipmentId
-        setEquipments(prevEquipments =>
-          prevEquipments.map(e => {
-            if (e.id !== equipmentId) return e
+        const equipment = equipments.find(e => e.id === equipmentId)
+        if (equipment) {
+          let newStatus = equipment.status
+          if (restoreStatus === '恢复正常') {
+            newStatus = '正常'
+          } else if (restoreStatus === '仍需观察') {
+            newStatus = '警告'
+          }
 
-            let newStatus = e.status
-            if (restoreStatus === '恢复正常') {
-              newStatus = '正常'
-            } else if (restoreStatus === '仍需观察') {
-              newStatus = '警告'
-            }
-
-            return {
-              ...e,
-              status: newStatus,
-              lastMaintenanceDate: nowStr,
-              lastMaintenanceRecordId: currentRecord.id,
-            }
+          updateEquipment(equipmentId, {
+            status: newStatus,
+            lastMaintenanceDate: nowStr,
+            lastMaintenanceRecordId: currentRecord.id,
           })
-        )
+        }
       }
 
       message.success('处理记录已更新')
@@ -320,30 +317,30 @@ const DeviceMaintenance = () => {
     }
   }
 
-  const filteredRecords = records.filter(r => {
+  const filteredRecords = maintenanceRecords.filter(r => {
     if (filterType && r.type !== filterType) return false
     if (filterStatus && r.status !== filterStatus) return false
     return true
   })
 
   const station = currentRecord
-    ? mockStations.find(s => s.id === currentRecord.stationId)
+    ? stations.find(s => s.id === currentRecord.stationId)
     : null
   const equipment = currentRecord?.equipmentId
     ? getEquipment(currentRecord.equipmentId)
     : null
 
   const typeStats = {
-    '日常维护': records.filter(r => r.type === '日常维护').length,
-    '故障维修': records.filter(r => r.type === '故障维修').length,
-    '应急处置': records.filter(r => r.type === '应急处置').length,
-    '升级改造': records.filter(r => r.type === '升级改造').length,
+    '日常维护': maintenanceRecords.filter(r => r.type === '日常维护').length,
+    '故障维修': maintenanceRecords.filter(r => r.type === '故障维修').length,
+    '应急处置': maintenanceRecords.filter(r => r.type === '应急处置').length,
+    '升级改造': maintenanceRecords.filter(r => r.type === '升级改造').length,
   }
 
   const statusStats = {
-    pending: records.filter(r => r.status === '待处理').length,
-    processing: records.filter(r => r.status === '处理中').length,
-    completed: records.filter(r => r.status === '已完成').length,
+    pending: maintenanceRecords.filter(r => r.status === '待处理').length,
+    processing: maintenanceRecords.filter(r => r.status === '处理中').length,
+    completed: maintenanceRecords.filter(r => r.status === '已完成').length,
   }
 
   const monthlyTrendOption = {
@@ -751,7 +748,7 @@ const DeviceMaintenance = () => {
             </Row>
             <Form.Item name="stationId" label="所属台站" rules={[{ required: true, message: '请选择台站' }]}>
               <Select placeholder="请选择台站" onChange={handleStationChange}>
-                {mockStations.map(s => (
+                {stations.map(s => (
                   <Option key={s.id} value={s.id}>{s.name}</Option>
                 ))}
               </Select>

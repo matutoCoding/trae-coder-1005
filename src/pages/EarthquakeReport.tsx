@@ -32,17 +32,12 @@ import {
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
-import type { Earthquake, WaveformData } from '../types'
-import { mockEarthquakes, mockStations, mockWaveformData, generateTimeSeriesData } from '../mock/data'
+import type { Earthquake } from '../types'
+import { generateTimeSeriesData } from '../mock/data'
+import { useApp } from '../store/AppContext'
 
 const { Option } = Select
 const { TextArea } = Input
-
-interface EarthquakeExt extends Earthquake {
-  autoLocateTime?: string
-  reviewTime?: string
-  publishTime?: string
-}
 
 const sourceTypeMap: Record<string, { label: string; color: string }> = {
   manual: { label: '手动录入', color: 'blue' },
@@ -51,21 +46,10 @@ const sourceTypeMap: Record<string, { label: string; color: string }> = {
 }
 
 const EarthquakeReport = () => {
-  const [earthquakes, setEarthquakes] = useState<EarthquakeExt[]>(
-    mockEarthquakes.map(eq => {
-      const ext: EarthquakeExt = { ...eq, autoLocateTime: eq.reportTime }
-      if (eq.status === '人工复核' || eq.status === '已发布') {
-        ext.reviewTime = dayjs(eq.reportTime).add(1, 'minute').format('YYYY-MM-DD HH:mm:ss')
-      }
-      if (eq.status === '已发布') {
-        ext.publishTime = dayjs(eq.reportTime).add(2, 'minute').format('YYYY-MM-DD HH:mm:ss')
-      }
-      return ext
-    })
-  )
+  const { earthquakes, stations, waveformData, addEarthquake, updateEarthquake } = useApp()
   const [modalType, setModalType] = useState<'view' | 'add' | 'review'>('view')
   const [modalVisible, setModalVisible] = useState(false)
-  const [currentEq, setCurrentEq] = useState<EarthquakeExt | null>(null)
+  const [currentEq, setCurrentEq] = useState<Earthquake | null>(null)
   const [form] = Form.useForm()
 
   const statusMap: Record<string, string> = {
@@ -88,7 +72,7 @@ const EarthquakeReport = () => {
 
   const getWaveformName = (waveformId: string | undefined) => {
     if (!waveformId) return '-'
-    const wf = mockWaveformData.find(w => w.id === waveformId)
+    const wf = waveformData.find(w => w.id === waveformId)
     return wf ? `${wf.stationName} - ${wf.channel}` : waveformId
   }
 
@@ -109,7 +93,7 @@ const EarthquakeReport = () => {
       dataIndex: 'magnitude',
       key: 'magnitude',
       width: 100,
-      render: (mag: number, record: EarthquakeExt) => (
+      render: (mag: number, record: Earthquake) => (
         <Tag color={getMagnitudeColor(mag)} style={{ fontSize: 14, fontWeight: 'bold' }}>
           M{mag}{record.magnitudeType}
         </Tag>
@@ -142,7 +126,7 @@ const EarthquakeReport = () => {
       title: '经纬度',
       key: 'coords',
       width: 180,
-      render: (_: any, record: EarthquakeExt) => (
+      render: (_: any, record: Earthquake) => (
         <span>
           {typeof record.longitude === 'number' ? record.longitude.toFixed(2) : '-'}°E,{' '}
           {typeof record.latitude === 'number' ? record.latitude.toFixed(2) : '-'}°N
@@ -160,7 +144,7 @@ const EarthquakeReport = () => {
       title: '操作',
       key: 'action',
       width: 220,
-      render: (_: any, record: EarthquakeExt) => (
+      render: (_: any, record: Earthquake) => (
         <Space size="small">
           <Button
             type="link"
@@ -205,7 +189,7 @@ const EarthquakeReport = () => {
     },
   ]
 
-  const handleView = (eq: EarthquakeExt) => {
+  const handleView = (eq: Earthquake) => {
     setCurrentEq(eq)
     setModalType('view')
     setModalVisible(true)
@@ -218,7 +202,7 @@ const EarthquakeReport = () => {
     setModalVisible(true)
   }
 
-  const handleReview = (eq: EarthquakeExt) => {
+  const handleReview = (eq: Earthquake) => {
     setCurrentEq(eq)
     setModalType('review')
     form.setFieldsValue({
@@ -229,7 +213,7 @@ const EarthquakeReport = () => {
     setModalVisible(true)
   }
 
-  const handlePublish = (eq: EarthquakeExt) => {
+  const handlePublish = (eq: Earthquake) => {
     const isLargeQuake = eq.magnitude >= 4
     const content = isLargeQuake
       ? `确定要发布 ${eq.location} ${eq.magnitude}级地震速报吗？\n\n本次地震震级较大，发布后将自动生成会商提醒。`
@@ -240,17 +224,12 @@ const EarthquakeReport = () => {
       content: content,
       onOk: () => {
         const publishTime = dayjs().format('YYYY-MM-DD HH:mm:ss')
-        setEarthquakes(earthquakes.map(e =>
-          e.id === eq.id
-            ? {
-                ...e,
-                status: '已发布' as const,
-                publishTime,
-                reportTime: publishTime,
-                meetingRequired: e.magnitude >= 4 ? true : e.meetingRequired,
-              }
-            : e
-        ))
+        updateEarthquake(eq.id, {
+          status: '已发布',
+          publishTime,
+          reportTime: publishTime,
+          meetingRequired: eq.magnitude >= 4 ? true : eq.meetingRequired,
+        })
         message.success('发布成功')
       },
     })
@@ -265,7 +244,7 @@ const EarthquakeReport = () => {
           : now.format('YYYY-MM-DD HH:mm:ss')
         const reportTimeVal = now.format('YYYY-MM-DD HH:mm:ss')
         const status = saveAsDraft ? '草稿' : '自动定位'
-        const newEq: EarthquakeExt = {
+        const newEq: Earthquake = {
           id: `EQ-2024-${String(earthquakes.length + 1).toString().padStart(3, '0')}`,
           location: values.location || '',
           magnitude: Number(values.magnitude) || 0,
@@ -283,33 +262,28 @@ const EarthquakeReport = () => {
           sourceType: 'manual',
           meetingRequired: false,
         }
-        setEarthquakes([newEq, ...earthquakes])
+        addEarthquake(newEq)
         message.success(saveAsDraft ? '已保存为草稿' : '录入成功')
       } else if (modalType === 'review' && currentEq) {
         const reviewTime = dayjs().format('YYYY-MM-DD HH:mm:ss')
         const newStatus = saveAsDraft ? '草稿' : '人工复核'
-        setEarthquakes(earthquakes.map(e =>
-          e.id === currentEq.id
-            ? {
-                ...e,
-                location: values.location || e.location,
-                magnitude: Number(values.magnitude) || e.magnitude,
-                magnitudeType: values.magnitudeType || e.magnitudeType,
-                occurTime: dayjs(values.occurTime).isValid()
-                  ? dayjs(values.occurTime).format('YYYY-MM-DD HH:mm:ss')
-                  : e.occurTime,
-                longitude: typeof values.longitude === 'number' ? values.longitude : e.longitude,
-                latitude: typeof values.latitude === 'number' ? values.latitude : e.latitude,
-                depth: typeof values.depth === 'number' ? values.depth : e.depth,
-                intensity: values.intensity || e.intensity,
-                affectedPopulation: values.affectedPopulation || e.affectedPopulation,
-                status: newStatus,
-                reviewTime: saveAsDraft ? undefined : reviewTime,
-                reportTime: reviewTime,
-                sourceType: 'manual',
-              }
-            : e
-        ))
+        updateEarthquake(currentEq.id, {
+          location: values.location || currentEq.location,
+          magnitude: Number(values.magnitude) || currentEq.magnitude,
+          magnitudeType: values.magnitudeType || currentEq.magnitudeType,
+          occurTime: dayjs(values.occurTime).isValid()
+            ? dayjs(values.occurTime).format('YYYY-MM-DD HH:mm:ss')
+            : currentEq.occurTime,
+          longitude: typeof values.longitude === 'number' ? values.longitude : currentEq.longitude,
+          latitude: typeof values.latitude === 'number' ? values.latitude : currentEq.latitude,
+          depth: typeof values.depth === 'number' ? values.depth : currentEq.depth,
+          intensity: values.intensity || currentEq.intensity,
+          affectedPopulation: values.affectedPopulation || currentEq.affectedPopulation,
+          status: newStatus,
+          reviewTime: saveAsDraft ? undefined : reviewTime,
+          reportTime: reviewTime,
+          sourceType: 'manual',
+        })
         message.success(saveAsDraft ? '已保存为草稿' : '复核完成')
       }
       setModalVisible(false)
@@ -328,7 +302,7 @@ const EarthquakeReport = () => {
 
   const stationNames = currentEq
     ? currentEq.stations.map(id => {
-        const s = mockStations.find(s => s.id === id)
+        const s = stations.find(s => s.id === id)
         return s?.name || id
       }).join('，')
     : ''
@@ -715,7 +689,7 @@ const EarthquakeReport = () => {
             </Row>
             <Form.Item name="stations" label="观测台站">
               <Select mode="multiple" placeholder="请选择观测台站">
-                {mockStations.map(s => (
+                {stations.map(s => (
                   <Option key={s.id} value={s.id}>{s.name}</Option>
                 ))}
               </Select>

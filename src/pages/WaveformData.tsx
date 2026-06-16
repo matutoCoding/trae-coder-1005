@@ -31,17 +31,12 @@ import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import type { WaveformData, Earthquake, Station, TransmissionStatus } from '../types'
-import { mockWaveformData, mockTransmissionStatus, mockStations, mockEarthquakes } from '../mock/data'
+import { mockTransmissionStatus } from '../mock/data'
+import { useApp } from '../store/AppContext'
 
 const { RangePicker } = DatePicker
 const { Option } = Select
 const { TextArea } = Input
-
-interface EarthquakeExt extends Earthquake {
-  autoLocateTime?: string
-  reviewTime?: string
-  publishTime?: string
-}
 
 const sourceTypeMap: Record<string, { label: string; color: string }> = {
   manual: { label: '手动录入', color: 'blue' },
@@ -57,20 +52,9 @@ const statusMap: Record<string, string> = {
 }
 
 const WaveformData = () => {
+  const { waveformData, earthquakes, stations, addEarthquake } = useApp()
   const [selectedStation, setSelectedStation] = useState<string>('')
-  const [selectedWaveform, setSelectedWaveform] = useState<WaveformData | null>(mockWaveformData[0])
-  const [earthquakes, setEarthquakes] = useState<EarthquakeExt[]>(
-    mockEarthquakes.map(eq => {
-      const ext: EarthquakeExt = { ...eq, autoLocateTime: eq.reportTime }
-      if (eq.status === '人工复核' || eq.status === '已发布') {
-        ext.reviewTime = dayjs(eq.reportTime).add(1, 'minute').format('YYYY-MM-DD HH:mm:ss')
-      }
-      if (eq.status === '已发布') {
-        ext.publishTime = dayjs(eq.reportTime).add(2, 'minute').format('YYYY-MM-DD HH:mm:ss')
-      }
-      return ext
-    })
-  )
+  const [selectedWaveform, setSelectedWaveform] = useState<WaveformData | null>(waveformData[0] ?? null)
 
   const [generateModalVisible, setGenerateModalVisible] = useState(false)
   const [generatingWaveform, setGeneratingWaveform] = useState<WaveformData | null>(null)
@@ -141,10 +125,10 @@ const WaveformData = () => {
   }
 
   const getStation = (stationId: string): Station | undefined => {
-    return mockStations.find(s => s.id === stationId)
+    return stations.find(s => s.id === stationId)
   }
 
-  const getRelatedEarthquake = (waveformId: string): EarthquakeExt | undefined => {
+  const getRelatedEarthquake = (waveformId: string): Earthquake | undefined => {
     return earthquakes.find(eq => eq.sourceWaveformId === waveformId)
   }
 
@@ -188,7 +172,7 @@ const WaveformData = () => {
         ? dayjs(values.occurTime).format('YYYY-MM-DD HH:mm:ss')
         : now.format('YYYY-MM-DD HH:mm:ss')
 
-      const newEq: EarthquakeExt = {
+      const newEq: Earthquake = {
         id: `EQ-2024-${String(earthquakes.length + 1).toString().padStart(3, '0')}`,
         location: values.location || '',
         magnitude: Number(values.magnitude) || 0,
@@ -205,7 +189,7 @@ const WaveformData = () => {
         meetingRequired: false,
       }
 
-      setEarthquakes([newEq, ...earthquakes])
+      addEarthquake(newEq)
       setGenerateModalVisible(false)
 
       Modal.success({
@@ -229,7 +213,7 @@ const WaveformData = () => {
     })
   }
 
-  const handleViewEarthquake = (eq: EarthquakeExt) => {
+  const handleViewEarthquake = (eq: Earthquake) => {
     Modal.info({
       title: '关联地震速报信息',
       width: 600,
@@ -430,9 +414,9 @@ const WaveformData = () => {
       <Row gutter={[16, 16]}>
         <Col span={6}>
           <Card>
-            <Statistic title="在线台站" value={onlineCount} suffix={`/${mockStations.length}`} />
+            <Statistic title="在线台站" value={onlineCount} suffix={`/${stations.length}`} />
             <Progress
-              percent={Math.round(onlineCount / mockStations.length * 100)}
+              percent={Math.round(onlineCount / stations.length * 100)}
               showInfo={false}
               strokeColor="#52c41a"
             />
@@ -479,7 +463,7 @@ const WaveformData = () => {
               value={selectedStation}
               onChange={setSelectedStation}
             >
-              {mockStations.map(s => (
+              {stations.map(s => (
                 <Option key={s.id} value={s.id}>{s.name}</Option>
               ))}
             </Select>
@@ -566,7 +550,7 @@ const WaveformData = () => {
           <Card title="波形数据列表" size="small">
             <Table
               columns={waveformColumns}
-              dataSource={mockWaveformData}
+              dataSource={waveformData}
               rowKey="id"
               size="small"
               pagination={{ pageSize: 5 }}

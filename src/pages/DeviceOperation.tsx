@@ -24,15 +24,14 @@ import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import type { Equipment, MaintenanceRecord } from '../types'
-import { mockEquipments, mockStations, mockMaintenanceRecords, generateTimeSeriesData } from '../mock/data'
+import { useApp } from '../store/AppContext'
 
 const { Option } = Select
 const { TextArea } = Input
 
 const DeviceOperation = () => {
   const navigate = useNavigate()
-  const [equipments, setEquipments] = useState<Equipment[]>(mockEquipments)
-  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(mockMaintenanceRecords)
+  const { equipments, maintenanceRecords, stations, addMaintenanceRecord } = useApp()
   const [filterType, setFilterType] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<string>('')
   const [searchText, setSearchText] = useState<string>('')
@@ -61,7 +60,7 @@ const DeviceOperation = () => {
   }
 
   const getStationName = (stationId: string) => {
-    const station = mockStations.find(s => s.id === stationId)
+    const station = stations.find(s => s.id === stationId)
     return station?.name || '-'
   }
 
@@ -185,7 +184,7 @@ const DeviceOperation = () => {
 
   const handleInitiateMaintenance = (device: Equipment) => {
     setCurrentDevice(device)
-    const station = mockStations.find(s => s.id === device.stationId)
+    const station = stations.find(s => s.id === device.stationId)
     form.setFieldsValue({
       type: '故障维修',
       stationId: device.stationId,
@@ -224,7 +223,7 @@ const DeviceOperation = () => {
         sourceType: 'equipment',
       }
 
-      setMaintenanceRecords([newRecord, ...maintenanceRecords])
+      addMaintenanceRecord(newRecord)
       setMaintainModalVisible(false)
       form.resetFields()
 
@@ -251,7 +250,7 @@ const DeviceOperation = () => {
   }
 
   const station = currentDevice
-    ? mockStations.find(s => s.id === currentDevice.stationId)
+    ? stations.find(s => s.id === currentDevice.stationId)
     : null
 
   const lastMaintenanceRecord = currentDevice

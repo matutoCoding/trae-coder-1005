@@ -33,7 +33,7 @@ import {
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import type { DutySchedule, HandoverRecord, MeetingRecord } from '../types'
-import { mockDutySchedules, mockHandoverRecords, mockMeetingRecords } from '../mock/data'
+import { useApp } from '../store/AppContext'
 
 const { Option } = Select
 const { TextArea } = Input
@@ -41,9 +41,20 @@ const { TabPane } = Tabs
 const { RangePicker } = DatePicker
 
 const DutyManagement = () => {
-  const [schedules, setSchedules] = useState<DutySchedule[]>(mockDutySchedules)
-  const [handoverRecords, setHandoverRecords] = useState<HandoverRecord[]>(mockHandoverRecords)
-  const [meetings, setMeetings] = useState<MeetingRecord[]>(mockMeetingRecords)
+  const {
+    dutySchedules,
+    handoverRecords,
+    meetingRecords,
+    stations,
+    earthquakes,
+    addDutySchedule,
+    updateDutySchedule,
+    addHandoverRecord,
+    updateHandoverRecord,
+    addMeetingRecord,
+    updateMeetingRecord,
+  } = useApp()
+
   const [mainTab, setMainTab] = useState('schedule')
   const [scheduleViewTab, setScheduleViewTab] = useState('list')
   const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs())
@@ -59,6 +70,7 @@ const DutyManagement = () => {
 
   const [scheduleModalType, setScheduleModalType] = useState<'view' | 'add' | 'edit'>('view')
   const [handoverModalType, setHandoverModalType] = useState<'add' | 'edit'>('add')
+  const [meetingModalType, setMeetingModalType] = useState<'view' | 'add'>('view')
 
   const [scheduleForm] = Form.useForm()
   const [handoverForm] = Form.useForm()
@@ -66,6 +78,10 @@ const DutyManagement = () => {
 
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [shiftFilter, setShiftFilter] = useState<string>('')
+
+  const handoverDateValue = Form.useWatch('date', handoverForm)
+  const handoverShiftValue = Form.useWatch('shift', handoverForm)
+  const handoverScheduleIdValue = Form.useWatch('scheduleId', handoverForm)
 
   const shiftColorMap: Record<string, string> = {
     '早班': 'green',
@@ -98,6 +114,17 @@ const DutyManagement = () => {
   const hasAbnormal = (record: HandoverRecord) => {
     return record.abnormalEvents && record.abnormalEvents !== '无'
   }
+
+  useMemo(() => {
+    if (handoverScheduleIdValue && handoverModalType === 'add') {
+      const matched = dutySchedules.find(s => s.id === handoverScheduleIdValue)
+      if (matched) {
+        handoverForm.setFieldsValue({
+          outgoingPersonnel: matched.personnel,
+        })
+      }
+    }
+  }, [handoverScheduleIdValue, dutySchedules, handoverForm, handoverModalType])
 
   const scheduleColumns = [
     {
@@ -371,8 +398,8 @@ const DutyManagement = () => {
 
   const selectedDateSchedules = useMemo(() => {
     const dateStr = selectedDate.format('YYYY-MM-DD')
-    return schedules.filter(s => dayjs(s.date).format('YYYY-MM-DD') === dateStr)
-  }, [schedules, selectedDate])
+    return dutySchedules.filter(s => dayjs(s.date).format('YYYY-MM-DD') === dateStr)
+  }, [dutySchedules, selectedDate])
 
   const selectedDateHandovers = useMemo(() => {
     const dateStr = selectedDate.format('YYYY-MM-DD')
@@ -380,15 +407,15 @@ const DutyManagement = () => {
   }, [handoverRecords, selectedDate])
 
   const availableSchedulesForHandover = useMemo(() => {
-    const dateVal = handoverForm.getFieldValue('date')
-    const shiftVal = handoverForm.getFieldValue('shift')
+    const dateVal = handoverDateValue
+    const shiftVal = handoverShiftValue
     if (!dateVal || !shiftVal) return []
     const dateStr = dayjs.isDayjs(dateVal) ? dateVal.format('YYYY-MM-DD') : dayjs(dateVal).format('YYYY-MM-DD')
-    return schedules.filter(s => {
+    return dutySchedules.filter(s => {
       const sDate = dayjs(s.date).format('YYYY-MM-DD')
       return sDate === dateStr && s.shift === shiftVal
     })
-  }, [schedules, handoverForm])
+  }, [dutySchedules, handoverDateValue, handoverShiftValue])
 
   const handleViewSchedule = (schedule: DutySchedule) => {
     setCurrentSchedule(schedule)
@@ -465,11 +492,13 @@ const DutyManagement = () => {
 
   const handleViewMeeting = (meeting: MeetingRecord) => {
     setCurrentMeeting(meeting)
+    setMeetingModalType('view')
     setMeetingModalVisible(true)
   }
 
   const handleAddMeeting = () => {
     setCurrentMeeting(null)
+    setMeetingModalType('add')
     meetingForm.resetFields()
     setMeetingModalVisible(true)
   }
@@ -491,16 +520,12 @@ const DutyManagement = () => {
       if (scheduleModalType === 'add') {
         const newSchedule: DutySchedule = {
           ...submitData,
-          id: `DS-${String(schedules.length + 1).padStart(3, '0')}`,
+          id: `DS-${String(dutySchedules.length + 1).padStart(3, '0')}`,
         }
-        setSchedules([...schedules, newSchedule])
+        addDutySchedule(newSchedule)
         message.success('排班创建成功')
       } else if (scheduleModalType === 'edit' && currentSchedule) {
-        setSchedules(schedules.map(s =>
-          s.id === currentSchedule.id
-            ? { ...s, ...submitData, id: s.id, handoverRecordId: s.handoverRecordId }
-            : s
-        ))
+        updateDutySchedule(currentSchedule.id, submitData)
         message.success('排班更新成功')
       }
       setScheduleModalVisible(false)
@@ -534,21 +559,10 @@ const DutyManagement = () => {
           ...submitData,
           id: `HO-${String(handoverRecords.length + 1).padStart(3, '0')}`,
         }
-        setHandoverRecords([newRecord, ...handoverRecords])
-        if (values.scheduleId) {
-          setSchedules(schedules.map(s =>
-            s.id === values.scheduleId
-              ? { ...s, handoverRecordId: newRecord.id }
-              : s
-          ))
-        }
+        addHandoverRecord(newRecord)
         message.success('交接班记录创建成功')
       } else if (handoverModalType === 'edit' && currentHandover) {
-        setHandoverRecords(handoverRecords.map(h =>
-          h.id === currentHandover.id
-            ? { ...h, ...submitData, id: h.id }
-            : h
-        ))
+        updateHandoverRecord(currentHandover.id, submitData)
         message.success('交接班记录更新成功')
       }
       setHandoverModalVisible(false)
@@ -567,9 +581,9 @@ const DutyManagement = () => {
       const newMeeting: MeetingRecord = {
         ...values,
         time: formattedTime,
-        id: `MT-${String(meetings.length + 1).padStart(3, '0')}`,
+        id: `MT-${String(meetingRecords.length + 1).padStart(3, '0')}`,
       }
-      setMeetings([newMeeting, ...meetings])
+      addMeetingRecord(newMeeting)
       setMeetingModalVisible(false)
       message.success('会议记录创建成功')
     })
@@ -577,7 +591,7 @@ const DutyManagement = () => {
 
   const getListData = (value: Dayjs) => {
     const dateStr = value.format('YYYY-MM-DD')
-    const daySchedules = schedules.filter(s => {
+    const daySchedules = dutySchedules.filter(s => {
       const sDate = dayjs(s.date).format('YYYY-MM-DD')
       return sDate === dateStr
     })
@@ -623,7 +637,7 @@ const DutyManagement = () => {
     setSelectedDate(value)
   }
 
-  const todaySchedule = schedules.filter(
+  const todaySchedule = dutySchedules.filter(
     s => dayjs(s.date).format('YYYY-MM-DD') === dayjs().format('YYYY-MM-DD')
   )
 
@@ -653,7 +667,7 @@ const DutyManagement = () => {
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="会议记录" value={meetings.length} suffix="份" />
+            <Statistic title="会议记录" value={meetingRecords.length} suffix="份" />
           </Card>
         </Col>
       </Row>
@@ -722,7 +736,7 @@ const DutyManagement = () => {
               <TabPane tab="列表视图" key="list">
                 <Table
                   columns={scheduleColumns}
-                  dataSource={schedules}
+                  dataSource={dutySchedules}
                   rowKey="id"
                   scroll={{ x: 1200 }}
                 />
@@ -887,7 +901,7 @@ const DutyManagement = () => {
           <TabPane tab="震情会商" key="meeting">
             <Table
               columns={meetingColumns}
-              dataSource={meetings}
+              dataSource={meetingRecords}
               rowKey="id"
               scroll={{ x: 1000 }}
             />
@@ -1187,7 +1201,7 @@ const DutyManagement = () => {
         open={meetingModalVisible}
         width={800}
         onCancel={() => setMeetingModalVisible(false)}
-        footer={currentMeeting ? null : (
+        footer={meetingModalType === 'view' ? null : (
           <Button type="primary" onClick={handleMeetingSubmit}>保存</Button>
         )}
         destroyOnClose

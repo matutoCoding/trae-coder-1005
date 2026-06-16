@@ -31,11 +31,9 @@ import type { Dayjs } from 'dayjs'
 import type { PrecursorData, MeetingRecord, Earthquake } from '../types'
 import {
   mockPrecursorData,
-  mockStations,
-  mockMeetingRecords,
-  mockEarthquakes,
   generateTimeSeriesData,
 } from '../mock/data'
+import { useApp } from '../store/AppContext'
 
 const { RangePicker } = DatePicker
 const { Option } = Select
@@ -50,10 +48,9 @@ const meetingTypeColorMap: Record<string, string> = {
 }
 
 const EarthquakeAnalysis = () => {
+  const { earthquakes, meetingRecords, stations, addMeetingRecord, updateMeetingRecord } = useApp()
   const [selectedType, setSelectedType] = useState<string>('')
   const [selectedStation, setSelectedStation] = useState<string>('')
-  const [meetingRecords, setMeetingRecords] = useState<MeetingRecord[]>(mockMeetingRecords)
-  const [meetings, setMeetings] = useState<MeetingRecord[]>(mockMeetingRecords)
   const [meetingModalVisible, setMeetingModalVisible] = useState(false)
   const [meetingModalType, setMeetingModalType] = useState<'view' | 'add'>('view')
   const [currentMeeting, setCurrentMeeting] = useState<MeetingRecord | null>(null)
@@ -68,7 +65,7 @@ const EarthquakeAnalysis = () => {
   const abnormalCount = mockPrecursorData.filter(d => d.isAbnormal).length
   const normalCount = mockPrecursorData.filter(d => !d.isAbnormal).length
 
-  const pendingMeetings = mockEarthquakes.filter(
+  const pendingMeetings = earthquakes.filter(
     eq => eq.status === '已发布' && eq.meetingRequired && !eq.meetingRecordId
   )
 
@@ -88,7 +85,7 @@ const EarthquakeAnalysis = () => {
 
   const getEarthquakeById = (id: string | undefined): Earthquake | undefined => {
     if (!id) return undefined
-    return mockEarthquakes.find(eq => eq.id === id)
+    return earthquakes.find(eq => eq.id === id)
   }
 
   const handleCreateMeeting = (earthquake: Earthquake) => {
@@ -139,8 +136,7 @@ const EarthquakeAnalysis = () => {
         earthquakeId: values.earthquakeId,
         meetingType: values.meetingType || '日常会商',
       }
-      setMeetingRecords([newRecord, ...meetingRecords])
-      setMeetings([newRecord, ...meetings])
+      addMeetingRecord(newRecord)
       setMeetingModalVisible(false)
       message.success('会议记录创建成功')
     })
@@ -163,7 +159,7 @@ const EarthquakeAnalysis = () => {
       dataIndex: 'stationId',
       key: 'stationId',
       render: (id: string) => {
-        const station = mockStations.find(s => s.id === id)
+        const station = stations.find(s => s.id === id)
         return station?.name || id
       },
     },
@@ -519,7 +515,7 @@ const EarthquakeAnalysis = () => {
                 allowClear
                 onChange={setSelectedStation}
               >
-                {mockStations.map(s => (
+                {stations.map(s => (
                 <Option key={s.id} value={s.id}>{s.name}</Option>
               ))}
               </Select>
@@ -559,7 +555,7 @@ const EarthquakeAnalysis = () => {
               <List
                 dataSource={abnormalData}
                 renderItem={(item) => {
-                  const station = mockStations.find(s => s.id === item.stationId)
+                  const station = stations.find(s => s.id === item.stationId)
                   return (
                     <List.Item>
                       <List.Item.Meta
@@ -737,7 +733,7 @@ const EarthquakeAnalysis = () => {
             </Row>
             <Form.Item name="earthquakeId" label="关联地震">
               <Select placeholder="请选择关联地震（可选）" allowClear>
-                {mockEarthquakes.map(eq => (
+                {earthquakes.map(eq => (
                   <Option key={eq.id} value={eq.id}>
                     {eq.id} - {eq.location} ({eq.magnitude}级)
                   </Option>

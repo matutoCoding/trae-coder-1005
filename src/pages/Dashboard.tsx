@@ -16,14 +16,8 @@ import {
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
+import { useApp } from '../store/AppContext'
 import {
-  mockStations,
-  mockEquipments,
-  mockEarthquakes,
-  mockMaintenanceRecords,
-  mockTransmissionStatus,
-  mockDutySchedules,
-  mockMeetingRecords,
   generateTimeSeriesData,
   generateHistogramData,
 } from '../mock/data'
@@ -31,18 +25,28 @@ import {
 const Dashboard = () => {
   const navigate = useNavigate()
 
-  const onlineCount = mockStations.filter(s => s.status === '运行中').length
-  const maintenanceCount = mockStations.filter(s => s.status === '维护中').length
-  const offlineCount = mockStations.filter(s => s.status === '停用').length
-  const normalEquipments = mockEquipments.filter(e => e.status === '正常').length
-  const warningEquipments = mockEquipments.filter(e => e.status === '警告').length
-  const faultEquipments = mockEquipments.filter(e => e.status === '故障' || e.status === '离线').length
+  const {
+    stations,
+    equipments,
+    earthquakes,
+    maintenanceRecords,
+    transmissionStatus,
+    dutySchedules,
+    meetingRecords,
+  } = useApp()
 
-  const pendingMeetings = mockEarthquakes.filter(e => e.status === '已发布' && e.meetingRequired && !e.meetingRecordId)
-  const pendingReview = mockEarthquakes.filter(e => e.status === '自动定位' || e.status === '草稿')
-  const pendingMaintenance = mockMaintenanceRecords.filter(m => m.status === '待处理' || m.status === '处理中')
-  const todaySchedules = mockDutySchedules.filter(s => s.date === dayjs().format('YYYY-MM-DD'))
-  const todayMeetings = mockMeetingRecords.filter(m => dayjs(m.time).isSame(dayjs(), 'day'))
+  const onlineCount = stations.filter(s => s.status === '运行中').length
+  const maintenanceCount = stations.filter(s => s.status === '维护中').length
+  const offlineCount = stations.filter(s => s.status === '停用').length
+  const normalEquipments = equipments.filter(e => e.status === '正常').length
+  const warningEquipments = equipments.filter(e => e.status === '警告').length
+  const faultEquipments = equipments.filter(e => e.status === '故障' || e.status === '离线').length
+
+  const pendingMeetings = earthquakes.filter(e => e.status === '已发布' && e.meetingRequired && !e.meetingRecordId)
+  const pendingReview = earthquakes.filter(e => e.status === '自动定位' || e.status === '草稿')
+  const pendingMaintenance = maintenanceRecords.filter(m => m.status === '待处理' || m.status === '处理中')
+  const todaySchedules = dutySchedules.filter(s => dayjs(s.date).isSame(dayjs(), 'day'))
+  const todayMeetings = meetingRecords.filter(m => dayjs(m.time).isSame(dayjs(), 'day'))
 
   const statusColumn = [
     {
@@ -122,16 +126,16 @@ const Dashboard = () => {
       radius: ['40%', '70%'],
       avoidLabelOverlap: false,
       data: [
-        { value: mockStations.filter(s => s.type === '测震台').length, name: '测震台' },
-        { value: mockStations.filter(s => s.type === '强震台').length, name: '强震台' },
-        { value: mockStations.filter(s => s.type === '前兆台').length, name: '前兆台' },
+        { value: stations.filter(s => s.type === '测震台').length, name: '测震台' },
+        { value: stations.filter(s => s.type === '强震台').length, name: '强震台' },
+        { value: stations.filter(s => s.type === '前兆台').length, name: '前兆台' },
       ],
       label: { show: true, formatter: '{b}: {c}' },
     }],
     color: ['#1890ff', '#52c41a', '#faad14'],
   }
 
-  const recentEarthquakes = [...mockEarthquakes].sort((a, b) =>
+  const recentEarthquakes = [...earthquakes].sort((a, b) =>
     new Date(b.occurTime).getTime() - new Date(a.occurTime).getTime()
   )
 
@@ -152,7 +156,7 @@ const Dashboard = () => {
           <Card>
             <Statistic
               title="台站总数"
-              value={mockStations.length}
+              value={stations.length}
               prefix={<DatabaseOutlined />}
               suffix="个"
             />
@@ -167,7 +171,7 @@ const Dashboard = () => {
           <Card>
             <Statistic
               title="设备总数"
-              value={mockEquipments.length}
+              value={equipments.length}
               prefix={<ToolOutlined />}
               suffix="台"
             />
@@ -236,7 +240,7 @@ const Dashboard = () => {
           <Card title="数据传输监控" size="small">
             <Table
               columns={statusColumn}
-              dataSource={mockTransmissionStatus}
+              dataSource={transmissionStatus}
               rowKey="stationId"
               size="small"
               pagination={false}
@@ -439,7 +443,7 @@ const Dashboard = () => {
           >
             <List
               size="small"
-              dataSource={[...mockMeetingRecords].sort((a, b) =>
+              dataSource={[...meetingRecords].sort((a, b) =>
                 dayjs(b.time).valueOf() - dayjs(a.time).valueOf()
               ).slice(0, 5)}
               renderItem={(item) => (
