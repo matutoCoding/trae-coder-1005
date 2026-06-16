@@ -11,19 +11,70 @@ import {
   DatePicker,
   Statistic,
   Progress,
+  Modal,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Descriptions,
+  Alert,
 } from 'antd'
-import { PlayCircleOutlined, ReloadOutlined, DownloadOutlined } from '@ant-design/icons'
+import {
+  PlayCircleOutlined,
+  ReloadOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+  EyeOutlined,
+  CheckCircleOutlined,
+} from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
-import type { WaveformData, TransmissionStatus } from '../types'
-import { mockWaveformData, mockTransmissionStatus, mockStations } from '../mock/data'
+import type { Dayjs } from 'dayjs'
+import type { WaveformData, Earthquake, Station, TransmissionStatus } from '../types'
+import { mockWaveformData, mockTransmissionStatus, mockStations, mockEarthquakes } from '../mock/data'
 
 const { RangePicker } = DatePicker
 const { Option } = Select
+const { TextArea } = Input
+
+interface EarthquakeExt extends Earthquake {
+  autoLocateTime?: string
+  reviewTime?: string
+  publishTime?: string
+}
+
+const sourceTypeMap: Record<string, { label: string; color: string }> = {
+  manual: { label: '手动录入', color: 'blue' },
+  waveform: { label: '波形触发', color: 'purple' },
+  auto: { label: '自动定位', color: 'default' },
+}
+
+const statusMap: Record<string, string> = {
+  '草稿': 'orange',
+  '自动定位': 'default',
+  '人工复核': 'blue',
+  '已发布': 'green',
+}
 
 const WaveformData = () => {
   const [selectedStation, setSelectedStation] = useState<string>('')
   const [selectedWaveform, setSelectedWaveform] = useState<WaveformData | null>(mockWaveformData[0])
+  const [earthquakes, setEarthquakes] = useState<EarthquakeExt[]>(
+    mockEarthquakes.map(eq => {
+      const ext: EarthquakeExt = { ...eq, autoLocateTime: eq.reportTime }
+      if (eq.status === '人工复核' || eq.status === '已发布') {
+        ext.reviewTime = dayjs(eq.reportTime).add(1, 'minute').format('YYYY-MM-DD HH:mm:ss')
+      }
+      if (eq.status === '已发布') {
+        ext.publishTime = dayjs(eq.reportTime).add(2, 'minute').format('YYYY-MM-DD HH:mm:ss')
+      }
+      return ext
+    })
+  )
+
+  const [generateModalVisible, setGenerateModalVisible] = useState(false)
+  const [generatingWaveform, setGeneratingWaveform] = useState<WaveformData | null>(null)
+  const [generateForm] = Form.useForm()
 
   const waveformOption = (data: WaveformData) => {
     const timePoints = Array.from({ length: data.data.length }, (_, i) => {
@@ -89,6 +140,135 @@ const WaveformData = () => {
     }
   }
 
+  const getStation = (stationId: string): Station | undefined => {
+    return mockStations.find(s => s.id === stationId)
+  }
+
+  const getRelatedEarthquake = (waveformId: string): EarthquakeExt | undefined => {
+    return earthquakes.find(eq => eq.sourceWaveformId === waveformId)
+  }
+
+  const getMagnitudeColor = (mag: number) => {
+    if (mag >= 5) return '#ff4d4f'
+    if (mag >= 3) return '#faad14'
+    return '#52c41a'
+  }
+
+  const estimateMagnitude = (maxAmplitude: number): number => {
+    if (maxAmplitude <= 0) return 2.5
+    const mag = Math.log10(Math.abs(maxAmplitude) * 1000) * 0.8 + 1.5
+    return Math.round(Math.min(Math.max(mag, 2.0), 8.0) * 10) / 10
+  }
+
+  const handleGenerateDraft = (waveform: WaveformData) => {
+    setGeneratingWaveform(waveform)
+    const station = getStation(waveform.stationId)
+    const defaultMagnitude = waveform.prelimMagnitude ?? estimateMagnitude(waveform.maxAmplitude)
+
+    generateForm.setFieldsValue({
+      location: `${waveform.stationName}附近`,
+      occurTime: dayjs(waveform.startTime),
+      magnitude: defaultMagnitude,
+      magnitudeType: 'ML',
+      depth: 10,
+      longitude: station?.longitude ?? 0,
+      latitude: station?.latitude ?? 0,
+      stationName: waveform.stationName,
+      channel: waveform.channel,
+    })
+    setGenerateModalVisible(true)
+  }
+
+  const handleGenerateSubmit = () => {
+    generateForm.validateFields().then(values => {
+      if (!generatingWaveform) return
+
+      const now = dayjs()
+      const occurTimeVal = dayjs(values.occurTime).isValid()
+        ? dayjs(values.occurTime).format('YYYY-MM-DD HH:mm:ss')
+        : now.format('YYYY-MM-DD HH:mm:ss')
+
+      const newEq: EarthquakeExt = {
+        id: `EQ-2024-${String(earthquakes.length + 1).toString().padStart(3, '0')}`,
+        location: values.location || '',
+        magnitude: Number(values.magnitude) || 0,
+        magnitudeType: values.magnitudeType || 'ML',
+        occurTime: occurTimeVal,
+        reportTime: now.format('YYYY-MM-DD HH:mm:ss'),
+        longitude: Number(values.longitude) || 0,
+        latitude: Number(values.latitude) || 0,
+        depth: Number(values.depth) || 0,
+        status: '草稿',
+        stations: [generatingWaveform.stationId],
+        sourceType: 'waveform',
+        sourceWaveformId: generatingWaveform.id,
+        meetingRequired: false,
+      }
+
+      setEarthquakes([newEq, ...earthquakes])
+      setGenerateModalVisible(false)
+
+      Modal.success({
+        title: '速报草稿已生成',
+        content: (
+          <div>
+            <p>草稿编号：{newEq.id}</p>
+            <p>发震地点：{newEq.location}</p>
+            <p>初步震级：M{newEq.magnitude}{newEq.magnitudeType}</p>
+            <p style={{ marginTop: 12, color: '#666' }}>
+              请到地震速报模块复核完善信息
+            </p>
+          </div>
+        ),
+        okText: '前往地震速报',
+        cancelText: '留在当前页',
+        onOk: () => {
+          window.location.href = '/earthquake-report'
+        },
+      })
+    })
+  }
+
+  const handleViewEarthquake = (eq: EarthquakeExt) => {
+    Modal.info({
+      title: '关联地震速报信息',
+      width: 600,
+      content: (
+        <Descriptions column={1} size="small" bordered>
+          <Descriptions.Item label="地震编号">
+            <Space>
+              {eq.id}
+              <Tag color={statusMap[eq.status]}>{eq.status}</Tag>
+            </Space>
+          </Descriptions.Item>
+          <Descriptions.Item label="发震地点">{eq.location}</Descriptions.Item>
+          <Descriptions.Item label="震级">
+            <Tag color={getMagnitudeColor(eq.magnitude)} style={{ fontSize: 14, fontWeight: 'bold' }}>
+              M{eq.magnitude}{eq.magnitudeType}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="发震时间">
+            {dayjs(eq.occurTime).format('YYYY-MM-DD HH:mm:ss')}
+          </Descriptions.Item>
+          <Descriptions.Item label="震源深度">{eq.depth.toFixed(1)} km</Descriptions.Item>
+          <Descriptions.Item label="经纬度">
+            {eq.longitude.toFixed(2)}°E, {eq.latitude.toFixed(2)}°N
+          </Descriptions.Item>
+          <Descriptions.Item label="来源类型">
+            {sourceTypeMap[eq.sourceType || 'auto'].label}
+          </Descriptions.Item>
+          <Descriptions.Item label="报告时间">
+            {dayjs(eq.reportTime).format('YYYY-MM-DD HH:mm:ss')}
+          </Descriptions.Item>
+        </Descriptions>
+      ),
+      okText: '前往地震速报页面',
+      onOk: () => {
+        window.location.href = '/earthquake-report'
+      },
+    })
+  }
+
   const waveformColumns = [
     {
       title: '台站名称',
@@ -139,12 +319,37 @@ const WaveformData = () => {
     {
       title: '操作',
       key: 'action',
-      width: 100,
-      render: (_: any, record: WaveformData) => (
-        <Button type="link" size="small" onClick={() => setSelectedWaveform(record)}>
-          查看波形
-        </Button>
-      ),
+      width: 200,
+      render: (_: any, record: WaveformData) => {
+        const relatedEq = getRelatedEarthquake(record.id)
+        return (
+          <Space size="small">
+            <Button type="link" size="small" onClick={() => setSelectedWaveform(record)}>
+              查看波形
+            </Button>
+            {record.hasEvent && !relatedEq && (
+              <Button
+                type="primary"
+                size="small"
+                icon={<FileTextOutlined />}
+                onClick={() => handleGenerateDraft(record)}
+              >
+                生成速报草稿
+              </Button>
+            )}
+            {record.hasEvent && relatedEq && (
+              <Button
+                type="link"
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => handleViewEarthquake(relatedEq)}
+              >
+                查看速报
+              </Button>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 
@@ -218,6 +423,8 @@ const WaveformData = () => {
     grid: { left: 50, right: 20, top: 40, bottom: 50 },
   }
 
+  const relatedEqForSelected = selectedWaveform ? getRelatedEarthquake(selectedWaveform.id) : null
+
   return (
     <div>
       <Row gutter={[16, 16]}>
@@ -283,11 +490,74 @@ const WaveformData = () => {
         }
       >
         {selectedWaveform && (
-          <ReactECharts
-            option={waveformOption(selectedWaveform)}
-            style={{ height: 300 }}
-            notMerge
-          />
+          <div>
+            <ReactECharts
+              option={waveformOption(selectedWaveform)}
+              style={{ height: 300 }}
+              notMerge
+            />
+            <div style={{ marginTop: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 4 }}>
+              <Row align="middle" justify="space-between">
+                <Col>
+                  <Space size="middle">
+                    <span>台站：<strong>{selectedWaveform.stationName}</strong></span>
+                    <span>通道：<strong>{selectedWaveform.channel}</strong></span>
+                    <span>采样率：<strong>{selectedWaveform.sampleRate}Hz</strong></span>
+                    <span>
+                      事件：
+                      <Tag color={selectedWaveform.hasEvent ? 'red' : 'green'}>
+                        {selectedWaveform.hasEvent ? '有事件' : '无事件'}
+                      </Tag>
+                    </span>
+                    {selectedWaveform.prelimMagnitude && (
+                      <span>
+                        初步震级：
+                        <Tag color={getMagnitudeColor(selectedWaveform.prelimMagnitude)}>
+                          M{selectedWaveform.prelimMagnitude}
+                        </Tag>
+                      </span>
+                    )}
+                  </Space>
+                </Col>
+                <Col>
+                  <Space>
+                    {selectedWaveform.hasEvent && !relatedEqForSelected && (
+                      <Button
+                        type="primary"
+                        icon={<FileTextOutlined />}
+                        onClick={() => handleGenerateDraft(selectedWaveform)}
+                      >
+                        生成速报草稿
+                      </Button>
+                    )}
+                    {selectedWaveform.hasEvent && relatedEqForSelected && (
+                      <Button
+                        icon={<EyeOutlined />}
+                        onClick={() => handleViewEarthquake(relatedEqForSelected)}
+                      >
+                        查看关联地震
+                      </Button>
+                    )}
+                  </Space>
+                </Col>
+              </Row>
+              {relatedEqForSelected && (
+                <Alert
+                  message="该波形已生成关联地震速报"
+                  description={
+                    <Space>
+                      <span>地震编号：<strong>{relatedEqForSelected.id}</strong></span>
+                      <span>状态：<Tag color={statusMap[relatedEqForSelected.status]}>{relatedEqForSelected.status}</Tag></span>
+                      <span>震级：M{relatedEqForSelected.magnitude}{relatedEqForSelected.magnitudeType}</span>
+                    </Space>
+                  }
+                  type="info"
+                  showIcon
+                  style={{ marginTop: 12 }}
+                />
+              )}
+            </div>
+          </div>
         )}
       </Card>
 
@@ -319,6 +589,127 @@ const WaveformData = () => {
       <Card title="传输状态统计" size="small" style={{ marginTop: 16 }}>
         <ReactECharts option={delayChartOption} style={{ height: 280 }} />
       </Card>
+
+      <Modal
+        title="生成地震速报草稿"
+        open={generateModalVisible}
+        onOk={handleGenerateSubmit}
+        onCancel={() => setGenerateModalVisible(false)}
+        okText="生成草稿"
+        cancelText="取消"
+        width={600}
+        destroyOnClose
+      >
+        {generatingWaveform && (
+          <div>
+            <Alert
+              message={`从波形 ${generatingWaveform.stationName} - ${generatingWaveform.channel} 生成速报草稿`}
+              description="以下字段已根据波形信息自动填充，您可以修改后生成草稿。"
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+            <Form
+              form={generateForm}
+              layout="vertical"
+              preserve={false}
+            >
+              <Row gutter={16}>
+                <Col span={16}>
+                  <Form.Item
+                    name="location"
+                    label="发震地点"
+                    rules={[{ required: true, message: '请输入发震地点' }]}
+                  >
+                    <Input placeholder="如：北京台站附近" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item
+                    name="depth"
+                    label="震源深度(km)"
+                    rules={[{ required: true, message: '请输入震源深度' }]}
+                  >
+                    <InputNumber min={0} max={700} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="magnitude"
+                    label="初步震级"
+                    rules={[{ required: true, message: '请输入震级' }]}
+                  >
+                    <InputNumber min={0} max={10} step={0.1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="magnitudeType"
+                    label="震级类型"
+                    rules={[{ required: true, message: '请选择震级类型' }]}
+                  >
+                    <Select>
+                      <Option value="ML">ML（地方震）</Option>
+                      <Option value="Ms">Ms（面波震级）</Option>
+                      <Option value="Mb">Mb（体波震级）</Option>
+                      <Option value="Mw">Mw（矩震级）</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item
+                name="occurTime"
+                label="发震时间"
+                rules={[{ required: true, message: '请选择发震时间' }]}
+              >
+                <DatePicker showTime style={{ width: '100%' }} />
+              </Form.Item>
+
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="longitude"
+                    label="经度(°E)"
+                    rules={[{ required: true, message: '请输入经度' }]}
+                  >
+                    <InputNumber min={73} max={135} step={0.01} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="latitude"
+                    label="纬度(°N)"
+                    rules={[{ required: true, message: '请输入纬度' }]}
+                  >
+                    <InputNumber min={3} max={54} step={0.01} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item name="stationName" label="来源台站">
+                    <Input disabled />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="channel" label="通道">
+                    <Input disabled />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Form.Item label="来源类型">
+                <Tag color="purple">波形触发 (waveform)</Tag>
+              </Form.Item>
+            </Form>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

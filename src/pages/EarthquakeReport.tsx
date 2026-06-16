@@ -17,6 +17,8 @@ import {
   Timeline,
   Tag as AntTag,
   DatePicker,
+  message,
+  Alert,
 } from 'antd'
 import {
   PlusOutlined,
@@ -24,12 +26,14 @@ import {
   CheckCircleOutlined,
   SendOutlined,
   ExclamationCircleOutlined,
+  SaveOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
-import type { Earthquake } from '../types'
-import { mockEarthquakes, mockStations, generateTimeSeriesData } from '../mock/data'
+import type { Earthquake, WaveformData } from '../types'
+import { mockEarthquakes, mockStations, mockWaveformData, generateTimeSeriesData } from '../mock/data'
 
 const { Option } = Select
 const { TextArea } = Input
@@ -38,6 +42,12 @@ interface EarthquakeExt extends Earthquake {
   autoLocateTime?: string
   reviewTime?: string
   publishTime?: string
+}
+
+const sourceTypeMap: Record<string, { label: string; color: string }> = {
+  manual: { label: '手动录入', color: 'blue' },
+  waveform: { label: '波形触发', color: 'purple' },
+  auto: { label: '自动定位', color: 'default' },
 }
 
 const EarthquakeReport = () => {
@@ -59,6 +69,7 @@ const EarthquakeReport = () => {
   const [form] = Form.useForm()
 
   const statusMap: Record<string, string> = {
+    '草稿': 'orange',
     '自动定位': 'default',
     '人工复核': 'blue',
     '已发布': 'green',
@@ -73,6 +84,12 @@ const EarthquakeReport = () => {
   const formatDateTime = (val: string | undefined | null) => {
     if (!val) return '-'
     return dayjs(val).isValid() ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : val
+  }
+
+  const getWaveformName = (waveformId: string | undefined) => {
+    if (!waveformId) return '-'
+    const wf = mockWaveformData.find(w => w.id === waveformId)
+    return wf ? `${wf.stationName} - ${wf.channel}` : waveformId
   }
 
   const columns = [
@@ -105,10 +122,14 @@ const EarthquakeReport = () => {
       render: (val: string) => formatDateTime(val),
     },
     {
-      title: '速报时间',
-      dataIndex: 'reportTime',
-      key: 'reportTime',
-      render: (val: string) => formatDateTime(val),
+      title: '来源',
+      dataIndex: 'sourceType',
+      key: 'sourceType',
+      width: 100,
+      render: (sourceType: string | undefined) => {
+        const info = sourceTypeMap[sourceType || 'auto']
+        return <Tag color={info.color}>{info.label}</Tag>
+      },
     },
     {
       title: '震源深度(km)',
@@ -138,7 +159,7 @@ const EarthquakeReport = () => {
     {
       title: '操作',
       key: 'action',
-      width: 200,
+      width: 220,
       render: (_: any, record: EarthquakeExt) => (
         <Space size="small">
           <Button
@@ -149,6 +170,16 @@ const EarthquakeReport = () => {
           >
             查看
           </Button>
+          {record.status === '草稿' && (
+            <Button
+              type="link"
+              size="small"
+              icon={<CheckCircleOutlined />}
+              onClick={() => handleReview(record)}
+            >
+              编辑
+            </Button>
+          )}
           {record.status === '自动定位' && (
             <Button
               type="link"
@@ -193,14 +224,20 @@ const EarthquakeReport = () => {
     form.setFieldsValue({
       ...eq,
       occurTime: dayjs(eq.occurTime),
+      stations: eq.stations,
     })
     setModalVisible(true)
   }
 
   const handlePublish = (eq: EarthquakeExt) => {
+    const isLargeQuake = eq.magnitude >= 4
+    const content = isLargeQuake
+      ? `确定要发布 ${eq.location} ${eq.magnitude}级地震速报吗？\n\n本次地震震级较大，发布后将自动生成会商提醒。`
+      : `确定要发布 ${eq.location} ${eq.magnitude}级地震速报吗？`
+
     Modal.confirm({
       title: '确认发布',
-      content: `确定要发布 ${eq.location} ${eq.magnitude}级地震速报吗？`,
+      content: content,
       onOk: () => {
         const publishTime = dayjs().format('YYYY-MM-DD HH:mm:ss')
         setEarthquakes(earthquakes.map(e =>
@@ -210,14 +247,16 @@ const EarthquakeReport = () => {
                 status: '已发布' as const,
                 publishTime,
                 reportTime: publishTime,
+                meetingRequired: e.magnitude >= 4 ? true : e.meetingRequired,
               }
             : e
         ))
+        message.success('发布成功')
       },
     })
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = (saveAsDraft: boolean = false) => {
     form.validateFields().then(values => {
       if (modalType === 'add') {
         const now = dayjs()
@@ -225,6 +264,7 @@ const EarthquakeReport = () => {
           ? dayjs(values.occurTime).format('YYYY-MM-DD HH:mm:ss')
           : now.format('YYYY-MM-DD HH:mm:ss')
         const reportTimeVal = now.format('YYYY-MM-DD HH:mm:ss')
+        const status = saveAsDraft ? '草稿' : '自动定位'
         const newEq: EarthquakeExt = {
           id: `EQ-2024-${String(earthquakes.length + 1).toString().padStart(3, '0')}`,
           location: values.location || '',
@@ -232,18 +272,22 @@ const EarthquakeReport = () => {
           magnitudeType: values.magnitudeType || 'ML',
           occurTime: occurTimeVal,
           reportTime: reportTimeVal,
-          autoLocateTime: reportTimeVal,
+          autoLocateTime: saveAsDraft ? undefined : reportTimeVal,
           longitude: Number(values.longitude) || 0,
           latitude: Number(values.latitude) || 0,
           depth: Number(values.depth) || 0,
-          status: '自动定位',
+          status,
           intensity: values.intensity,
           affectedPopulation: values.affectedPopulation,
           stations: values.stations || [],
+          sourceType: 'manual',
+          meetingRequired: false,
         }
         setEarthquakes([newEq, ...earthquakes])
+        message.success(saveAsDraft ? '已保存为草稿' : '录入成功')
       } else if (modalType === 'review' && currentEq) {
         const reviewTime = dayjs().format('YYYY-MM-DD HH:mm:ss')
+        const newStatus = saveAsDraft ? '草稿' : '人工复核'
         setEarthquakes(earthquakes.map(e =>
           e.id === currentEq.id
             ? {
@@ -259,14 +303,26 @@ const EarthquakeReport = () => {
                 depth: typeof values.depth === 'number' ? values.depth : e.depth,
                 intensity: values.intensity || e.intensity,
                 affectedPopulation: values.affectedPopulation || e.affectedPopulation,
-                status: '人工复核' as const,
-                reviewTime,
+                status: newStatus,
+                reviewTime: saveAsDraft ? undefined : reviewTime,
                 reportTime: reviewTime,
+                sourceType: 'manual',
               }
             : e
         ))
+        message.success(saveAsDraft ? '已保存为草稿' : '复核完成')
       }
       setModalVisible(false)
+    })
+  }
+
+  const handleGotoAnalysis = () => {
+    Modal.confirm({
+      title: '跳转会商记录',
+      content: '是否跳转到震情分析页面查看会商记录？',
+      onOk: () => {
+        window.location.href = '/earthquake-analysis'
+      },
     })
   }
 
@@ -326,9 +382,25 @@ const EarthquakeReport = () => {
   }
 
   const recentEarthquake = earthquakes[0]
+  const pendingMeetingCount = earthquakes.filter(e => e.status === '已发布' && e.meetingRequired && !e.meetingRecordId).length
 
   return (
     <div>
+      {pendingMeetingCount > 0 && (
+        <Alert
+          message="待会商提醒"
+          description={`有 ${pendingMeetingCount} 条已发布地震待会商，请及时处理！`}
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          action={
+            <Button size="small" type="primary" onClick={() => window.location.href = '/earthquake-analysis'}>
+              去处理
+            </Button>
+          }
+        />
+      )}
+
       <Row gutter={[16, 16]}>
         <Col span={6}>
           <Card>
@@ -353,10 +425,10 @@ const EarthquakeReport = () => {
         <Col span={6}>
           <Card>
             <Statistic
-              title="待复核"
-              value={earthquakes.filter(e => e.status === '自动定位').length}
+              title="草稿"
+              value={earthquakes.filter(e => e.status === '草稿').length}
               suffix="条"
-              valueStyle={{ color: '#faad14' }}
+              valueStyle={{ color: '#fa8c16' }}
             />
           </Card>
         </Col>
@@ -421,16 +493,26 @@ const EarthquakeReport = () => {
         size="small"
         style={{ marginTop: 16 }}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            人工录入
-          </Button>
+          <Space>
+            <Button icon={<SaveOutlined />} onClick={() => {
+              setCurrentEq(null)
+              setModalType('add')
+              form.resetFields()
+              setModalVisible(true)
+            }}>
+              草稿录入
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+              人工录入
+            </Button>
+          </Space>
         }
       >
         <Table
           columns={columns}
           dataSource={earthquakes}
           rowKey="id"
-          scroll={{ x: 1400 }}
+          scroll={{ x: 1500 }}
         />
       </Card>
 
@@ -459,9 +541,21 @@ const EarthquakeReport = () => {
         }
         open={modalVisible}
         width={800}
+        destroyOnClose
         onCancel={() => setModalVisible(false)}
-        onOk={modalType !== 'view' ? handleSubmit : undefined}
-        footer={modalType === 'view' ? null : undefined}
+        footer={modalType === 'view' ? null : (
+          <Space>
+            <Button onClick={() => handleSubmit(true)} icon={<SaveOutlined />}>
+              保存草稿
+            </Button>
+            <Button onClick={() => setModalVisible(false)}>
+              取消
+            </Button>
+            <Button type="primary" onClick={() => handleSubmit(false)}>
+              {modalType === 'add' ? '提交' : '确认复核'}
+            </Button>
+          </Space>
+        )}
       >
         {modalType === 'view' && currentEq ? (
           <div>
@@ -486,7 +580,33 @@ const EarthquakeReport = () => {
               <Descriptions.Item label="烈度">{currentEq.intensity || '-'}</Descriptions.Item>
               <Descriptions.Item label="影响人口">{currentEq.affectedPopulation?.toLocaleString() || '-'}</Descriptions.Item>
               <Descriptions.Item label="观测台站">{stationNames || '-'}</Descriptions.Item>
+              <Descriptions.Item label="来源类型">
+                {sourceTypeMap[currentEq.sourceType || 'auto'].label}
+              </Descriptions.Item>
+              <Descriptions.Item label="关联波形">
+                {getWaveformName(currentEq.sourceWaveformId)}
+              </Descriptions.Item>
+              <Descriptions.Item label="是否需要会商">
+                <Tag color={currentEq.meetingRequired ? 'red' : 'default'}>
+                  {currentEq.meetingRequired ? '是' : '否'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="关联会商记录">
+                {currentEq.meetingRecordId || '-'}
+              </Descriptions.Item>
             </Descriptions>
+
+            {currentEq.meetingRecordId && (
+              <div style={{ marginTop: 16, textAlign: 'right' }}>
+                <Button
+                  type="primary"
+                  icon={<FileTextOutlined />}
+                  onClick={handleGotoAnalysis}
+                >
+                  查看会商记录
+                </Button>
+              </div>
+            )}
 
             <Card title="速报流程" size="small" style={{ marginTop: 16 }}>
               <Timeline
@@ -506,19 +626,22 @@ const EarthquakeReport = () => {
                     ),
                   },
                   {
-                    color: currentEq.status !== '自动定位' ? 'green' : 'blue',
+                    color: currentEq.status !== '自动定位' && currentEq.status !== '草稿' ? 'green' : 'blue',
                     children: (
                       <div>
                         <div style={{ fontWeight: 'bold' }}>
-                          {currentEq.status !== '自动定位' ? '人工复核完成' : '等待人工复核'}
+                          {currentEq.status === '草稿' ? '草稿状态' :
+                           currentEq.status !== '自动定位' ? '人工复核完成' : '等待人工复核'}
                         </div>
                         <div style={{ color: '#666', fontSize: 12 }}>
-                          时间：{currentEq.status !== '自动定位'
+                          时间：{currentEq.status !== '自动定位' && currentEq.status !== '草稿'
                             ? formatDateTime(currentEq.reviewTime || currentEq.reportTime)
                             : '-'}
                         </div>
                         <div style={{ color: '#999', fontSize: 12 }}>
-                          {currentEq.status !== '自动定位'
+                          {currentEq.status === '草稿'
+                            ? '草稿状态，可继续编辑'
+                            : currentEq.status !== '自动定位'
                             ? '值班人员对参数进行人工审核校正'
                             : '值班人员审核地震参数'}
                         </div>
@@ -590,6 +713,13 @@ const EarthquakeReport = () => {
                 </Form.Item>
               </Col>
             </Row>
+            <Form.Item name="stations" label="观测台站">
+              <Select mode="multiple" placeholder="请选择观测台站">
+                {mockStations.map(s => (
+                  <Option key={s.id} value={s.id}>{s.name}</Option>
+                ))}
+              </Select>
+            </Form.Item>
             {modalType === 'review' && (
               <>
                 <Form.Item name="intensity" label="烈度">

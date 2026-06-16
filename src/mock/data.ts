@@ -7,6 +7,7 @@ import type {
   PrecursorData,
   MaintenanceRecord,
   DutySchedule,
+  HandoverRecord,
   MeetingRecord,
   TransmissionStatus,
 } from '../types'
@@ -44,6 +45,7 @@ export const mockEquipments: Equipment[] = mockStations.flatMap((station, statio
     manufacturer: 'Guralp',
     installDate: dayjs().subtract(3 + stationIndex, 'year').format('YYYY-MM-DD'),
     lastMaintenanceDate: dayjs().subtract(stationIndex, 'month').format('YYYY-MM-DD'),
+    lastMaintenanceRecordId: stationIndex === 4 ? 'MR-001' : stationIndex === 7 ? 'MR-002' : undefined,
     status: (['正常', '正常', '警告', '正常', '故障', '正常', '正常', '离线', '正常', '正常'] as const)[stationIndex],
     runTime: 8760 * (3 + stationIndex),
     temperature: 20 + Math.random() * 5,
@@ -121,6 +123,7 @@ export const mockWaveformData: WaveformData[] = mockStations.slice(0, 5).map((st
   maxAmplitude: index === 2 ? 2.5 : 0.8,
   minAmplitude: index === 2 ? -2.3 : -0.7,
   hasEvent: index === 2,
+  prelimMagnitude: index === 2 ? 3.8 : undefined,
 }))
 
 export const mockEarthquakes: Earthquake[] = [
@@ -133,11 +136,17 @@ export const mockEarthquakes: Earthquake[] = [
     magnitude: 4.5,
     magnitudeType: 'ML',
     occurTime: dayjs().subtract(2, 'hour').format('YYYY-MM-DD HH:mm:ss'),
-    reportTime: dayjs().subtract(1, 'hour').subtract(58, 'minute').format('YYYY-MM-DD HH:mm:ss'),
+    reportTime: dayjs().subtract(2, 'hour').add(2, 'minute').format('YYYY-MM-DD HH:mm:ss'),
+    autoLocateTime: dayjs().subtract(2, 'hour').add(2, 'minute').format('YYYY-MM-DD HH:mm:ss'),
+    reviewTime: dayjs().subtract(2, 'hour').add(15, 'minute').format('YYYY-MM-DD HH:mm:ss'),
+    publishTime: dayjs().subtract(2, 'hour').add(20, 'minute').format('YYYY-MM-DD HH:mm:ss'),
     status: '已发布',
     intensity: 'V',
     affectedPopulation: 500000,
     stations: ['ST-001', 'ST-002', 'ST-003', 'ST-004', 'ST-005'],
+    sourceType: 'auto',
+    meetingRequired: true,
+    meetingRecordId: 'MT-001',
   },
   {
     id: 'EQ-2024-002',
@@ -149,8 +158,11 @@ export const mockEarthquakes: Earthquake[] = [
     magnitudeType: 'ML',
     occurTime: dayjs().subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
     reportTime: dayjs().subtract(1, 'day').add(2, 'minute').format('YYYY-MM-DD HH:mm:ss'),
+    autoLocateTime: dayjs().subtract(1, 'day').add(2, 'minute').format('YYYY-MM-DD HH:mm:ss'),
     status: '人工复核',
     stations: ['ST-007', 'ST-008', 'ST-009'],
+    sourceType: 'auto',
+    meetingRequired: false,
   },
   {
     id: 'EQ-2024-003',
@@ -162,8 +174,11 @@ export const mockEarthquakes: Earthquake[] = [
     magnitudeType: 'ML',
     occurTime: dayjs().subtract(3, 'day').format('YYYY-MM-DD HH:mm:ss'),
     reportTime: dayjs().subtract(3, 'day').add(1, 'minute').format('YYYY-MM-DD HH:mm:ss'),
+    autoLocateTime: dayjs().subtract(3, 'day').add(1, 'minute').format('YYYY-MM-DD HH:mm:ss'),
     status: '自动定位',
     stations: ['ST-010'],
+    sourceType: 'auto',
+    meetingRequired: false,
   },
 ]
 
@@ -210,6 +225,8 @@ export const mockMaintenanceRecords: MaintenanceRecord[] = [
     status: '处理中',
     startTime: dayjs().subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
     handler: '李四',
+    sourceType: 'equipment',
+    restoreEquipmentStatus: undefined,
   },
   {
     id: 'MR-002',
@@ -222,6 +239,8 @@ export const mockMaintenanceRecords: MaintenanceRecord[] = [
     endTime: dayjs().subtract(2, 'day').format('YYYY-MM-DD HH:mm:ss'),
     handler: '王五',
     result: '光纤已修复，网络恢复正常',
+    sourceType: 'equipment',
+    restoreEquipmentStatus: '恢复正常',
   },
   {
     id: 'MR-003',
@@ -232,6 +251,7 @@ export const mockMaintenanceRecords: MaintenanceRecord[] = [
     status: '待处理',
     startTime: dayjs().add(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
     handler: '赵六',
+    sourceType: 'manual',
   },
   {
     id: 'MR-004',
@@ -243,6 +263,7 @@ export const mockMaintenanceRecords: MaintenanceRecord[] = [
     status: '处理中',
     startTime: dayjs().subtract(6, 'hour').format('YYYY-MM-DD HH:mm:ss'),
     handler: '钱七',
+    sourceType: 'manual',
   },
 ]
 
@@ -263,33 +284,78 @@ export const mockDutySchedules: DutySchedule[] = Array.from({ length: 7 }, (_, i
     shift: '早班' as const,
     personnel,
     leader: ['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九'][i],
+    handoverRecordId: i === 0 ? 'HO-001' : undefined,
   }
 }).flatMap((item) => [
   item,
-  { ...item, id: item.id.replace('DS', 'DS2'), shift: '中班' as const, personnel: item.personnel.map(p => p + '_副') },
+  { ...item, id: item.id.replace('DS', 'DS2'), shift: '中班' as const, personnel: item.personnel.map(p => p + '_副'), handoverRecordId: item.id === 'DS-001' ? 'HO-002' : undefined },
   { ...item, id: item.id.replace('DS', 'DS3'), shift: '晚班' as const, personnel: item.personnel.map(p => p + '_备') },
 ])
+
+export const mockHandoverRecords: HandoverRecord[] = [
+  {
+    id: 'HO-001',
+    date: dayjs().format('YYYY-MM-DD'),
+    shift: '早班',
+    scheduleId: 'DS-001',
+    oncomingPersonnel: ['张三', '李四'],
+    outgoingPersonnel: ['钱七', '孙八'],
+    handoverTime: dayjs().subtract(2, 'hour').format('YYYY-MM-DD HH:mm:ss'),
+    handoverContent: '各项监测设备运行正常，数据传输稳定。完成昨日震情复盘，地震速报系统已切换至当日值班人员。',
+    abnormalEvents: '无',
+    handlingResult: '无',
+    operator: '张三',
+    notes: '接班后请关注唐山台站测震仪温度变化趋势',
+  },
+  {
+    id: 'HO-002',
+    date: dayjs().format('YYYY-MM-DD'),
+    shift: '中班',
+    scheduleId: 'DS2-001',
+    oncomingPersonnel: ['张三_副', '李四_副'],
+    outgoingPersonnel: ['张三', '李四'],
+    handoverTime: dayjs().subtract(1, 'hour').format('YYYY-MM-DD HH:mm:ss'),
+    handoverContent: '下午数据监测正常，完成了2条设备维护工单的处理跟踪。',
+    abnormalEvents: '石家庄台水位波动，已核实为降雨影响，属于正常变化',
+    handlingResult: '已记录异常并通知台站值守人员核实',
+    operator: '张三_副',
+  },
+]
 
 export const mockMeetingRecords: MeetingRecord[] = [
   {
     id: 'MT-001',
-    title: '2024年第15次震情会商会',
-    time: dayjs().subtract(1, 'day').format('YYYY-MM-DD HH:mm:ss'),
+    title: '唐山古冶区4.5级地震紧急震情会商会',
+    time: dayjs().subtract(2, 'hour').add(30, 'minute').format('YYYY-MM-DD HH:mm:ss'),
     location: '应急指挥中心',
     participants: ['张三', '李四', '王五', '赵六', '钱七'],
-    content: '1. 分析近期地震活动情况\n2. 讨论唐山4.5级地震影响\n3. 检查前兆观测数据异常\n4. 部署下一阶段工作',
-    conclusions: '1. 近期地震活动处于正常水平\n2. 唐山地震为孤立型地震\n3. 石家庄台水位异常已核实为降雨影响\n4. 加强重点区域监测',
+    content: '1. 通报唐山古冶区4.5级地震基本情况\n2. 分析地震序列发展趋势\n3. 评估地震影响范围\n4. 部署应急处置工作',
+    conclusions: '1. 本次地震为孤立型地震，短期内发生更大地震可能性较小\n2. 震中烈度约V度，无人员伤亡报告\n3. 启动应急响应三级\n4. 加强台站监测，及时发布余震信息',
     recorder: '李四',
+    earthquakeId: 'EQ-2024-001',
+    meetingType: '紧急会商',
   },
   {
     id: 'MT-002',
-    title: '周度工作例会',
+    title: '2024年第15次周度震情会商会',
     time: dayjs().subtract(4, 'day').format('YYYY-MM-DD HH:mm:ss'),
     location: '三楼会议室',
     participants: ['张三', '李四', '王五', '赵六'],
     content: '1. 上周工作总结\n2. 本周工作计划\n3. 设备维护情况汇报',
     conclusions: '1. 完成10个台站巡检\n2. 修复2处设备故障\n3. 本周重点保障数据传输质量',
     recorder: '王五',
+    meetingType: '日常会商',
+  },
+  {
+    id: 'MT-003',
+    title: '月度震情形势分析会',
+    time: dayjs().subtract(10, 'day').format('YYYY-MM-DD HH:mm:ss'),
+    location: '三楼会议室',
+    participants: ['张三', '李四', '王五', '赵六', '钱七', '孙八'],
+    content: '1. 本月地震活动分析\n2. 前兆观测数据研判\n3. 下月震情形势研判',
+    conclusions: '1. 本月共记录地震32次，以中小地震为主\n2. 前兆数据整体平稳，未发现明显异常\n3. 下月震情维持平静态势',
+    recorder: '赵六',
+    meetingType: '震情会商',
   },
 ]
 

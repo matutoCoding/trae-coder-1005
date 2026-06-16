@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Card,
   Table,
@@ -18,6 +18,8 @@ import {
   Calendar,
   Badge,
   message,
+  Divider,
+  Empty,
 } from 'antd'
 import {
   PlusOutlined,
@@ -25,27 +27,45 @@ import {
   UserOutlined,
   CalendarOutlined,
   FileTextOutlined,
+  SwapOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
-import type { DutySchedule, MeetingRecord } from '../types'
-import { mockDutySchedules, mockMeetingRecords } from '../mock/data'
+import type { DutySchedule, HandoverRecord, MeetingRecord } from '../types'
+import { mockDutySchedules, mockHandoverRecords, mockMeetingRecords } from '../mock/data'
 
 const { Option } = Select
 const { TextArea } = Input
 const { TabPane } = Tabs
+const { RangePicker } = DatePicker
 
 const DutyManagement = () => {
   const [schedules, setSchedules] = useState<DutySchedule[]>(mockDutySchedules)
+  const [handoverRecords, setHandoverRecords] = useState<HandoverRecord[]>(mockHandoverRecords)
   const [meetings, setMeetings] = useState<MeetingRecord[]>(mockMeetingRecords)
-  const [activeTab, setActiveTab] = useState('1')
+  const [mainTab, setMainTab] = useState('schedule')
+  const [scheduleViewTab, setScheduleViewTab] = useState('list')
+  const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs())
+
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false)
+  const [handoverModalVisible, setHandoverModalVisible] = useState(false)
+  const [handoverDetailVisible, setHandoverDetailVisible] = useState(false)
   const [meetingModalVisible, setMeetingModalVisible] = useState(false)
+
   const [currentSchedule, setCurrentSchedule] = useState<DutySchedule | null>(null)
+  const [currentHandover, setCurrentHandover] = useState<HandoverRecord | null>(null)
   const [currentMeeting, setCurrentMeeting] = useState<MeetingRecord | null>(null)
+
   const [scheduleModalType, setScheduleModalType] = useState<'view' | 'add' | 'edit'>('view')
+  const [handoverModalType, setHandoverModalType] = useState<'add' | 'edit'>('add')
+
   const [scheduleForm] = Form.useForm()
+  const [handoverForm] = Form.useForm()
   const [meetingForm] = Form.useForm()
+
+  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null)
+  const [shiftFilter, setShiftFilter] = useState<string>('')
 
   const shiftColorMap: Record<string, string> = {
     '早班': 'green',
@@ -69,6 +89,14 @@ const DutyManagement = () => {
     if (!val) return '-'
     const d = dayjs(val)
     return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : val
+  }
+
+  const getHandoverByScheduleId = (scheduleId: string) => {
+    return handoverRecords.find(h => h.scheduleId === scheduleId)
+  }
+
+  const hasAbnormal = (record: HandoverRecord) => {
+    return record.abnormalEvents && record.abnormalEvents !== '无'
   }
 
   const scheduleColumns = [
@@ -110,6 +138,24 @@ const DutyManagement = () => {
       width: 100,
     },
     {
+      title: '交接班状态',
+      dataIndex: 'handoverRecordId',
+      key: 'handoverStatus',
+      width: 120,
+      render: (_: any, record: DutySchedule) => {
+        const handover = getHandoverByScheduleId(record.id)
+        if (handover) {
+          return (
+            <Space>
+              <Tag color="green">已交接</Tag>
+              {hasAbnormal(handover) && <ExclamationCircleOutlined style={{ color: '#faad14' }} />}
+            </Space>
+          )
+        }
+        return <Tag color="default">未交接</Tag>
+      },
+    },
+    {
       title: '备注',
       dataIndex: 'notes',
       key: 'notes',
@@ -118,21 +164,123 @@ const DutyManagement = () => {
     {
       title: '操作',
       key: 'action',
+      width: 220,
+      render: (_: any, record: DutySchedule) => {
+        const handover = getHandoverByScheduleId(record.id)
+        return (
+          <Space size="small">
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => handleViewSchedule(record)}
+            >
+              查看
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => handleEditSchedule(record)}
+            >
+              编辑
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              icon={<SwapOutlined />}
+              onClick={() => handleHandoverFromSchedule(record)}
+            >
+              {handover ? '查看交接' : '交接班'}
+            </Button>
+          </Space>
+        )
+      },
+    },
+  ]
+
+  const handoverColumns = [
+    {
+      title: '日期',
+      dataIndex: 'date',
+      key: 'date',
+      width: 120,
+      render: (val: string) => formatDate(val),
+    },
+    {
+      title: '班次',
+      dataIndex: 'shift',
+      key: 'shift',
+      width: 100,
+      render: (shift: string) => (
+        <Tag color={shiftColorMap[shift]}>{shift}</Tag>
+      ),
+    },
+    {
+      title: '交班人员',
+      dataIndex: 'outgoingPersonnel',
+      key: 'outgoingPersonnel',
+      render: (personnel: string[]) => (
+        <Space wrap>
+          {personnel.map((p, i) => (
+            <Tag key={i}>{p}</Tag>
+          ))}
+        </Space>
+      ),
+    },
+    {
+      title: '接班人员',
+      dataIndex: 'oncomingPersonnel',
+      key: 'oncomingPersonnel',
+      render: (personnel: string[]) => (
+        <Space wrap>
+          {personnel.map((p, i) => (
+            <Tag key={i} color="green">{p}</Tag>
+          ))}
+        </Space>
+      ),
+    },
+    {
+      title: '交接时间',
+      dataIndex: 'handoverTime',
+      key: 'handoverTime',
+      width: 170,
+      render: (val: string) => formatDateTime(val),
+    },
+    {
+      title: '异常',
+      dataIndex: 'abnormalEvents',
+      key: 'abnormal',
+      width: 80,
+      render: (val: string) => (
+        val && val !== '无'
+          ? <Tag color="orange" icon={<ExclamationCircleOutlined />}>有异常</Tag>
+          : <Tag color="green">正常</Tag>
+      ),
+    },
+    {
+      title: '操作人',
+      dataIndex: 'operator',
+      key: 'operator',
+      width: 100,
+    },
+    {
+      title: '操作',
+      key: 'action',
       width: 150,
-      render: (_: any, record: DutySchedule) => (
+      render: (_: any, record: HandoverRecord) => (
         <Space size="small">
           <Button
             type="link"
             size="small"
             icon={<EyeOutlined />}
-            onClick={() => handleViewSchedule(record)}
+            onClick={() => handleViewHandover(record)}
           >
             查看
           </Button>
           <Button
             type="link"
             size="small"
-            onClick={() => handleEditSchedule(record)}
+            onClick={() => handleEditHandover(record)}
           >
             编辑
           </Button>
@@ -205,6 +353,43 @@ const DutyManagement = () => {
     },
   ]
 
+  const filteredHandoverRecords = useMemo(() => {
+    let result = [...handoverRecords]
+    if (dateRange && dateRange[0] && dateRange[1]) {
+      const start = dateRange[0].startOf('day')
+      const end = dateRange[1].endOf('day')
+      result = result.filter(h => {
+        const d = dayjs(h.date)
+        return d.isAfter(start) && d.isBefore(end)
+      })
+    }
+    if (shiftFilter) {
+      result = result.filter(h => h.shift === shiftFilter)
+    }
+    return result.sort((a, b) => dayjs(b.handoverTime).valueOf() - dayjs(a.handoverTime).valueOf())
+  }, [handoverRecords, dateRange, shiftFilter])
+
+  const selectedDateSchedules = useMemo(() => {
+    const dateStr = selectedDate.format('YYYY-MM-DD')
+    return schedules.filter(s => dayjs(s.date).format('YYYY-MM-DD') === dateStr)
+  }, [schedules, selectedDate])
+
+  const selectedDateHandovers = useMemo(() => {
+    const dateStr = selectedDate.format('YYYY-MM-DD')
+    return handoverRecords.filter(h => dayjs(h.date).format('YYYY-MM-DD') === dateStr)
+  }, [handoverRecords, selectedDate])
+
+  const availableSchedulesForHandover = useMemo(() => {
+    const dateVal = handoverForm.getFieldValue('date')
+    const shiftVal = handoverForm.getFieldValue('shift')
+    if (!dateVal || !shiftVal) return []
+    const dateStr = dayjs.isDayjs(dateVal) ? dateVal.format('YYYY-MM-DD') : dayjs(dateVal).format('YYYY-MM-DD')
+    return schedules.filter(s => {
+      const sDate = dayjs(s.date).format('YYYY-MM-DD')
+      return sDate === dateStr && s.shift === shiftVal
+    })
+  }, [schedules, handoverForm])
+
   const handleViewSchedule = (schedule: DutySchedule) => {
     setCurrentSchedule(schedule)
     setScheduleModalType('view')
@@ -226,6 +411,56 @@ const DutyManagement = () => {
       date: dayjs(schedule.date),
     })
     setScheduleModalVisible(true)
+  }
+
+  const handleHandoverFromSchedule = (schedule: DutySchedule) => {
+    const handover = getHandoverByScheduleId(schedule.id)
+    if (handover) {
+      handleViewHandover(handover)
+    } else {
+      setCurrentSchedule(schedule)
+      setHandoverModalType('add')
+      handoverForm.resetFields()
+      handoverForm.setFieldsValue({
+        date: dayjs(schedule.date),
+        shift: schedule.shift,
+        scheduleId: schedule.id,
+        outgoingPersonnel: schedule.personnel,
+        handoverTime: dayjs(),
+        abnormalEvents: '无',
+        handlingResult: '无',
+      })
+      setHandoverModalVisible(true)
+    }
+  }
+
+  const handleViewHandover = (record: HandoverRecord) => {
+    setCurrentHandover(record)
+    setHandoverDetailVisible(true)
+  }
+
+  const handleAddHandover = () => {
+    setCurrentHandover(null)
+    setCurrentSchedule(null)
+    setHandoverModalType('add')
+    handoverForm.resetFields()
+    handoverForm.setFieldsValue({
+      handoverTime: dayjs(),
+      abnormalEvents: '无',
+      handlingResult: '无',
+    })
+    setHandoverModalVisible(true)
+  }
+
+  const handleEditHandover = (record: HandoverRecord) => {
+    setCurrentHandover(record)
+    setHandoverModalType('edit')
+    handoverForm.setFieldsValue({
+      ...record,
+      date: dayjs(record.date),
+      handoverTime: dayjs(record.handoverTime),
+    })
+    setHandoverModalVisible(true)
   }
 
   const handleViewMeeting = (meeting: MeetingRecord) => {
@@ -263,12 +498,60 @@ const DutyManagement = () => {
       } else if (scheduleModalType === 'edit' && currentSchedule) {
         setSchedules(schedules.map(s =>
           s.id === currentSchedule.id
-            ? { ...s, ...submitData, id: s.id }
+            ? { ...s, ...submitData, id: s.id, handoverRecordId: s.handoverRecordId }
             : s
         ))
         message.success('排班更新成功')
       }
       setScheduleModalVisible(false)
+    })
+  }
+
+  const handleHandoverSubmit = () => {
+    handoverForm.validateFields().then(values => {
+      const dateVal = values.date as Dayjs | string
+      const formattedDate = dayjs.isDayjs(dateVal)
+        ? (dateVal as Dayjs).format('YYYY-MM-DD')
+        : dayjs(dateVal).isValid()
+          ? dayjs(dateVal).format('YYYY-MM-DD')
+          : dayjs().format('YYYY-MM-DD')
+
+      const timeVal = values.handoverTime as Dayjs | string
+      const formattedTime = dayjs.isDayjs(timeVal)
+        ? (timeVal as Dayjs).format('YYYY-MM-DD HH:mm:ss')
+        : dayjs(timeVal).isValid()
+          ? dayjs(timeVal).format('YYYY-MM-DD HH:mm:ss')
+          : dayjs().format('YYYY-MM-DD HH:mm:ss')
+
+      const submitData: HandoverRecord = {
+        ...values,
+        date: formattedDate,
+        handoverTime: formattedTime,
+      }
+
+      if (handoverModalType === 'add') {
+        const newRecord: HandoverRecord = {
+          ...submitData,
+          id: `HO-${String(handoverRecords.length + 1).padStart(3, '0')}`,
+        }
+        setHandoverRecords([newRecord, ...handoverRecords])
+        if (values.scheduleId) {
+          setSchedules(schedules.map(s =>
+            s.id === values.scheduleId
+              ? { ...s, handoverRecordId: newRecord.id }
+              : s
+          ))
+        }
+        message.success('交接班记录创建成功')
+      } else if (handoverModalType === 'edit' && currentHandover) {
+        setHandoverRecords(handoverRecords.map(h =>
+          h.id === currentHandover.id
+            ? { ...h, ...submitData, id: h.id }
+            : h
+        ))
+        message.success('交接班记录更新成功')
+      }
+      setHandoverModalVisible(false)
     })
   }
 
@@ -298,28 +581,57 @@ const DutyManagement = () => {
       const sDate = dayjs(s.date).format('YYYY-MM-DD')
       return sDate === dateStr
     })
-    return daySchedules.map(s => ({
-      type: s.shift === '早班' ? 'success' : s.shift === '中班' ? 'processing' : 'warning',
-      content: `${s.shift}: ${s.personnel.join(', ')}`,
-    }))
+    const dayHandovers = handoverRecords.filter(h => {
+      const hDate = dayjs(h.date).format('YYYY-MM-DD')
+      return hDate === dateStr
+    })
+    return {
+      schedules: daySchedules.map(s => ({
+        type: s.shift === '早班' ? 'success' : s.shift === '中班' ? 'processing' : 'warning',
+        content: `${s.shift}: ${s.personnel.join(', ')}`,
+      })),
+      hasHandover: dayHandovers.length > 0,
+      handoverCount: dayHandovers.length,
+      hasAbnormal: dayHandovers.some(h => hasAbnormal(h)),
+    }
   }
 
   const dateCellRender = (value: Dayjs) => {
-    const listData = getListData(value)
+    const { schedules: scheduleList, hasHandover, hasAbnormal: hasAbn } = getListData(value)
     return (
-      <ul className="events" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
-        {listData.map((item, i) => (
-          <li key={i} style={{ lineHeight: 1.8 }}>
-            <Badge status={item.type as any} text={item.content} />
-          </li>
-        ))}
-      </ul>
+      <div style={{ height: '100%' }}>
+        <ul className="events" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+          {scheduleList.map((item, i) => (
+            <li key={i} style={{ lineHeight: 1.8 }}>
+              <Badge status={item.type as any} text={item.content} />
+            </li>
+          ))}
+        </ul>
+        {hasHandover && (
+          <div style={{ marginTop: 4 }}>
+            <Badge
+              color={hasAbn ? 'orange' : 'green'}
+              text={`${hasAbn ? '有异常' : ''}交接班记录`}
+            />
+          </div>
+        )}
+      </div>
     )
+  }
+
+  const onDateSelect = (value: Dayjs) => {
+    setSelectedDate(value)
   }
 
   const todaySchedule = schedules.filter(
     s => dayjs(s.date).format('YYYY-MM-DD') === dayjs().format('YYYY-MM-DD')
   )
+
+  const todayHandover = handoverRecords.filter(
+    h => dayjs(h.date).format('YYYY-MM-DD') === dayjs().format('YYYY-MM-DD')
+  )
+
+  const personnelOptions = ['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十', '郑一', '冯二']
 
   return (
     <div>
@@ -336,7 +648,7 @@ const DutyManagement = () => {
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="待开会议" value={2} suffix="个" />
+            <Statistic title="今日交接班" value={todayHandover.length} suffix="次" />
           </Card>
         </Col>
         <Col span={6}>
@@ -370,6 +682,14 @@ const DutyManagement = () => {
                       <span style={{ color: '#888' }}>带班领导：</span>
                       {s.leader}
                     </div>
+                    <div>
+                      <span style={{ color: '#888' }}>交接状态：</span>
+                      {getHandoverByScheduleId(s.id) ? (
+                        <Tag color="green">已交接</Tag>
+                      ) : (
+                        <Tag color="default">未交接</Tag>
+                      )}
+                    </div>
                   </Space>
                 </Card>
               </Col>
@@ -382,9 +702,13 @@ const DutyManagement = () => {
         title="值班管理"
         size="small"
         style={{ marginTop: 16 }}
-        extra={activeTab === '1' ? (
+        extra={mainTab === 'schedule' ? (
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAddSchedule}>
             新建排班
+          </Button>
+        ) : mainTab === 'handover' ? (
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAddHandover}>
+            新增交接班记录
           </Button>
         ) : (
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAddMeeting}>
@@ -392,26 +716,175 @@ const DutyManagement = () => {
           </Button>
         )}
       >
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane tab="值班排班" key="1">
-            <Tabs defaultActiveKey="list">
+        <Tabs activeKey={mainTab} onChange={setMainTab}>
+          <TabPane tab="排班管理" key="schedule">
+            <Tabs activeKey={scheduleViewTab} onChange={setScheduleViewTab}>
               <TabPane tab="列表视图" key="list">
                 <Table
                   columns={scheduleColumns}
                   dataSource={schedules}
                   rowKey="id"
-                  scroll={{ x: 1000 }}
+                  scroll={{ x: 1200 }}
                 />
               </TabPane>
               <TabPane tab="日历视图" key="calendar">
-                <Card>
-                  <Calendar dateCellRender={dateCellRender} />
-                </Card>
+                <Row gutter={16}>
+                  <Col span={16}>
+                    <Card>
+                      <Calendar
+                        dateCellRender={dateCellRender}
+                        onSelect={onDateSelect}
+                        value={selectedDate}
+                      />
+                    </Card>
+                  </Col>
+                  <Col span={8}>
+                    <Card
+                      title={`${selectedDate.format('YYYY-MM-DD')} 详情`}
+                      size="small"
+                    >
+                      <Divider orientation="left" style={{ margin: '8px 0' }}>
+                        排班列表 ({selectedDateSchedules.length})
+                      </Divider>
+                      {selectedDateSchedules.length > 0 ? (
+                        <Space direction="vertical" style={{ width: '100%' }} size="small">
+                          {selectedDateSchedules.map(s => (
+                            <Card key={s.id} size="small" type="inner">
+                              <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                                <Space>
+                                  <Tag color={shiftColorMap[s.shift]}>{s.shift}</Tag>
+                                  {getHandoverByScheduleId(s.id) ? (
+                                    <Tag color="green">已交接</Tag>
+                                  ) : (
+                                    <Tag color="default">未交接</Tag>
+                                  )}
+                                </Space>
+                                <div style={{ fontSize: 12, color: '#666' }}>
+                                  {s.personnel.join('、')}
+                                </div>
+                                <Space size="small">
+                                  <Button
+                                    size="small"
+                                    type="link"
+                                    icon={<EyeOutlined />}
+                                    onClick={() => handleViewSchedule(s)}
+                                  >
+                                    查看
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    type="link"
+                                    onClick={() => handleEditSchedule(s)}
+                                  >
+                                    编辑
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    type="link"
+                                    icon={<SwapOutlined />}
+                                    onClick={() => handleHandoverFromSchedule(s)}
+                                  >
+                                    {getHandoverByScheduleId(s.id) ? '查看交接' : '交接班'}
+                                  </Button>
+                                </Space>
+                              </Space>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <Empty description="暂无排班" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      )}
+
+                      <Divider orientation="left" style={{ margin: '16px 0 8px 0' }}>
+                        交接班记录 ({selectedDateHandovers.length})
+                      </Divider>
+                      {selectedDateHandovers.length > 0 ? (
+                        <Space direction="vertical" style={{ width: '100%' }} size="small">
+                          {selectedDateHandovers.map(h => (
+                            <Card key={h.id} size="small" type="inner">
+                              <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                                <Space>
+                                  <Tag color={shiftColorMap[h.shift]}>{h.shift}</Tag>
+                                  {hasAbnormal(h) && (
+                                    <Tag color="orange" icon={<ExclamationCircleOutlined />}>异常</Tag>
+                                  )}
+                                </Space>
+                                <div style={{ fontSize: 12, color: '#666' }}>
+                                  交班：{h.outgoingPersonnel.join('、')}
+                                </div>
+                                <div style={{ fontSize: 12, color: '#666' }}>
+                                  接班：{h.oncomingPersonnel.join('、')}
+                                </div>
+                                <Button
+                                  size="small"
+                                  type="link"
+                                  icon={<EyeOutlined />}
+                                  onClick={() => handleViewHandover(h)}
+                                >
+                                  查看详情
+                                </Button>
+                              </Space>
+                            </Card>
+                          ))}
+                        </Space>
+                      ) : (
+                        <div style={{ textAlign: 'center' }}>
+                          <Empty description="暂无交接记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          <Button
+                            type="primary"
+                            size="small"
+                            icon={<PlusOutlined />}
+                            onClick={handleAddHandover}
+                          >
+                            新增交接班
+                          </Button>
+                        </div>
+                      )}
+                    </Card>
+                  </Col>
+                </Row>
               </TabPane>
             </Tabs>
           </TabPane>
 
-          <TabPane tab="震情会商" key="2">
+          <TabPane tab="交接班记录" key="handover">
+            <Card size="small" style={{ marginBottom: 16 }}>
+              <Space wrap>
+                <span>日期范围：</span>
+                <RangePicker
+                  value={dateRange}
+                  onChange={(dates) => setDateRange(dates as [Dayjs, Dayjs] | null)}
+                  format="YYYY-MM-DD"
+                />
+                <span>班次：</span>
+                <Select
+                  placeholder="全部班次"
+                  style={{ width: 120 }}
+                  value={shiftFilter || undefined}
+                  onChange={(val) => setShiftFilter(val || '')}
+                  allowClear
+                >
+                  <Option value="早班">早班</Option>
+                  <Option value="中班">中班</Option>
+                  <Option value="晚班">晚班</Option>
+                </Select>
+                <Button onClick={() => {
+                  setDateRange(null)
+                  setShiftFilter('')
+                }}>
+                  重置
+                </Button>
+              </Space>
+            </Card>
+            <Table
+              columns={handoverColumns}
+              dataSource={filteredHandoverRecords}
+              rowKey="id"
+              scroll={{ x: 1200 }}
+            />
+          </TabPane>
+
+          <TabPane tab="震情会商" key="meeting">
             <Table
               columns={meetingColumns}
               dataSource={meetings}
@@ -454,8 +927,62 @@ const DutyManagement = () => {
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="带班领导">{currentSchedule.leader}</Descriptions.Item>
+              <Descriptions.Item label="交接班状态">
+                {getHandoverByScheduleId(currentSchedule.id) ? (
+                  <Tag color="green">已交接</Tag>
+                ) : (
+                  <Tag color="default">未交接</Tag>
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label="备注">{currentSchedule.notes || '-'}</Descriptions.Item>
             </Descriptions>
+            {getHandoverByScheduleId(currentSchedule.id) && (
+              <Card
+                size="small"
+                style={{ marginTop: 16 }}
+                title="交接班信息"
+                extra={
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => {
+                      const h = getHandoverByScheduleId(currentSchedule.id)
+                      if (h) {
+                        setScheduleModalVisible(false)
+                        handleViewHandover(h)
+                      }
+                    }}
+                  >
+                    查看详情
+                  </Button>
+                }
+              >
+                {(() => {
+                  const h = getHandoverByScheduleId(currentSchedule.id)
+                  if (!h) return null
+                  return (
+                    <Space direction="vertical" size="small">
+                      <div>
+                        <span style={{ color: '#888' }}>交接时间：</span>
+                        {formatDateTime(h.handoverTime)}
+                      </div>
+                      <div>
+                        <span style={{ color: '#888' }}>操作人：</span>
+                        {h.operator}
+                      </div>
+                      <div>
+                        <span style={{ color: '#888' }}>异常事件：</span>
+                        {hasAbnormal(h) ? (
+                          <Tag color="orange">有异常</Tag>
+                        ) : (
+                          <span>无</span>
+                        )}
+                      </div>
+                    </Space>
+                  )
+                })()}
+              </Card>
+            )}
           </div>
         ) : (
           <Form form={scheduleForm} layout="vertical" preserve={false}>
@@ -471,14 +998,14 @@ const DutyManagement = () => {
             </Form.Item>
             <Form.Item name="personnel" label="值班人员" rules={[{ required: true, message: '请选择值班人员' }]}>
               <Select mode="multiple" placeholder="请选择值班人员">
-                {['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十'].map(p => (
+                {personnelOptions.map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
             </Form.Item>
             <Form.Item name="leader" label="带班领导" rules={[{ required: true, message: '请选择带班领导' }]}>
               <Select placeholder="请选择带班领导">
-                {['张三', '李四', '王五', '赵六', '钱七'].map(p => (
+                {personnelOptions.slice(0, 7).map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
@@ -487,6 +1014,171 @@ const DutyManagement = () => {
               <TextArea rows={2} placeholder="备注信息" />
             </Form.Item>
           </Form>
+        )}
+      </Modal>
+
+      <Modal
+        title={handoverModalType === 'add' ? '新增交接班记录' : '编辑交接班记录'}
+        open={handoverModalVisible}
+        width={700}
+        onCancel={() => setHandoverModalVisible(false)}
+        onOk={handleHandoverSubmit}
+        destroyOnClose
+        maskClosable={false}
+      >
+        <Form form={handoverForm} layout="vertical" preserve={false}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="date" label="日期" rules={[{ required: true, message: '请选择日期' }]}>
+                <DatePicker
+                  style={{ width: '100%' }}
+                  format="YYYY-MM-DD"
+                  placeholder="请选择日期"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="shift" label="班次" rules={[{ required: true, message: '请选择班次' }]}>
+                <Select placeholder="请选择班次">
+                  <Option value="早班">早班 (08:00 - 16:00)</Option>
+                  <Option value="中班">中班 (16:00 - 00:00)</Option>
+                  <Option value="晚班">晚班 (00:00 - 08:00)</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="scheduleId" label="关联排班">
+            <Select placeholder="选择关联的排班（可选）" allowClear>
+              {availableSchedulesForHandover.map(s => (
+                <Option key={s.id} value={s.id}>
+                  {s.shift} - {s.personnel.join('、')}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="outgoingPersonnel" label="交班人员" rules={[{ required: true, message: '请输入交班人员' }]}>
+                <Select mode="tags" placeholder="请输入交班人员，回车添加">
+                  {personnelOptions.map(p => (
+                    <Option key={p} value={p}>{p}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="oncomingPersonnel" label="接班人员" rules={[{ required: true, message: '请输入接班人员' }]}>
+                <Select mode="tags" placeholder="请输入接班人员，回车添加">
+                  {personnelOptions.map(p => (
+                    <Option key={p} value={p}>{p}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="handoverTime" label="交接时间" rules={[{ required: true, message: '请选择交接时间' }]}>
+            <DatePicker
+              showTime
+              style={{ width: '100%' }}
+              format="YYYY-MM-DD HH:mm:ss"
+              placeholder="请选择交接时间"
+            />
+          </Form.Item>
+          <Form.Item name="handoverContent" label="交接内容" rules={[{ required: true, message: '请输入交接内容' }]}>
+            <TextArea rows={3} placeholder="请输入交接内容" />
+          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="abnormalEvents" label="异常事件">
+                <TextArea rows={2} placeholder="请输入异常事件" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="handlingResult" label="处理结果">
+                <TextArea rows={2} placeholder="请输入处理结果" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="notes" label="备注">
+            <TextArea rows={2} placeholder="备注信息（可选）" />
+          </Form.Item>
+          <Form.Item name="operator" label="操作人" rules={[{ required: true, message: '请输入操作人' }]}>
+            <Input placeholder="请输入操作人" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="交接班记录详情"
+        open={handoverDetailVisible}
+        width={700}
+        onCancel={() => setHandoverDetailVisible(false)}
+        footer={[
+          <Button key="edit" type="primary" onClick={() => {
+            if (currentHandover) {
+              setHandoverDetailVisible(false)
+              handleEditHandover(currentHandover)
+            }
+          }}>
+            编辑
+          </Button>,
+          <Button key="close" onClick={() => setHandoverDetailVisible(false)}>
+            关闭
+          </Button>,
+        ]}
+        destroyOnClose
+      >
+        {currentHandover && (
+          <div>
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="日期">{formatDate(currentHandover.date)}</Descriptions.Item>
+              <Descriptions.Item label="班次">
+                <Tag color={shiftColorMap[currentHandover.shift]}>{currentHandover.shift}</Tag>
+                <span style={{ marginLeft: 8, color: '#888', fontSize: 12 }}>
+                  {shiftTimeMap[currentHandover.shift]}
+                </span>
+              </Descriptions.Item>
+              <Descriptions.Item label="交接时间" span={2}>
+                {formatDateTime(currentHandover.handoverTime)}
+              </Descriptions.Item>
+              <Descriptions.Item label="交班人员" span={2}>
+                <Space wrap>
+                  {currentHandover.outgoingPersonnel.map((p, i) => (
+                    <Tag key={i}>{p}</Tag>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="接班人员" span={2}>
+                <Space wrap>
+                  {currentHandover.oncomingPersonnel.map((p, i) => (
+                    <Tag key={i} color="green">{p}</Tag>
+                  ))}
+                </Space>
+              </Descriptions.Item>
+              <Descriptions.Item label="操作人">{currentHandover.operator}</Descriptions.Item>
+              <Descriptions.Item label="异常">
+                {hasAbnormal(currentHandover) ? (
+                  <Tag color="orange" icon={<ExclamationCircleOutlined />}>有异常</Tag>
+                ) : (
+                  <Tag color="green">正常</Tag>
+                )}
+              </Descriptions.Item>
+            </Descriptions>
+            <Card title="交接内容" size="small" style={{ marginTop: 16 }}>
+              <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{currentHandover.handoverContent}</pre>
+            </Card>
+            <Card title="异常事件" size="small" style={{ marginTop: 16 }}>
+              <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{currentHandover.abnormalEvents || '无'}</pre>
+            </Card>
+            <Card title="处理结果" size="small" style={{ marginTop: 16 }}>
+              <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{currentHandover.handlingResult || '无'}</pre>
+            </Card>
+            {currentHandover.notes && (
+              <Card title="备注" size="small" style={{ marginTop: 16 }}>
+                <pre style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{currentHandover.notes}</pre>
+              </Card>
+            )}
+          </div>
         )}
       </Modal>
 
@@ -541,14 +1233,14 @@ const DutyManagement = () => {
             </Row>
             <Form.Item name="participants" label="参会人员" rules={[{ required: true, message: '请选择参会人员' }]}>
               <Select mode="multiple" placeholder="请选择参会人员">
-                {['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十'].map(p => (
+                {personnelOptions.map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
             </Form.Item>
             <Form.Item name="recorder" label="记录人" rules={[{ required: true, message: '请选择记录人' }]}>
               <Select placeholder="请选择记录人">
-                {['张三', '李四', '王五', '赵六', '钱七'].map(p => (
+                {personnelOptions.slice(0, 7).map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>

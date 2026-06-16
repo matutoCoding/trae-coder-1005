@@ -12,22 +12,36 @@ import {
   Progress,
   Descriptions,
   Modal,
+  Form,
+  Button,
+  message,
+  Alert,
+  DatePicker,
 } from 'antd'
-import { SearchOutlined, EyeOutlined } from '@ant-design/icons'
+import { SearchOutlined, EyeOutlined, ToolOutlined, LinkOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
-import type { Equipment } from '../types'
-import { mockEquipments, mockStations, generateTimeSeriesData } from '../mock/data'
+import { useNavigate } from 'react-router-dom'
+import dayjs from 'dayjs'
+import type { Dayjs } from 'dayjs'
+import type { Equipment, MaintenanceRecord } from '../types'
+import { mockEquipments, mockStations, mockMaintenanceRecords, generateTimeSeriesData } from '../mock/data'
 
 const { Option } = Select
+const { TextArea } = Input
 
 const DeviceOperation = () => {
+  const navigate = useNavigate()
+  const [equipments, setEquipments] = useState<Equipment[]>(mockEquipments)
+  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(mockMaintenanceRecords)
   const [filterType, setFilterType] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<string>('')
   const [searchText, setSearchText] = useState<string>('')
-  const [modalVisible, setModalVisible] = useState(false)
+  const [detailModalVisible, setDetailModalVisible] = useState(false)
+  const [maintainModalVisible, setMaintainModalVisible] = useState(false)
   const [currentDevice, setCurrentDevice] = useState<Equipment | null>(null)
+  const [form] = Form.useForm()
 
-  const filteredEquipments = mockEquipments.filter(e => {
+  const filteredEquipments = equipments.filter(e => {
     if (filterType && e.type !== filterType) return false
     if (filterStatus && e.status !== filterStatus) return false
     if (searchText && !e.name.includes(searchText) && !e.model.includes(searchText)) return false
@@ -41,15 +55,28 @@ const DeviceOperation = () => {
     '离线': 'default',
   }
 
+  const sourceTypeMap: Record<string, { text: string; color: string }> = {
+    'manual': { text: '手动创建', color: 'blue' },
+    'equipment': { text: '设备触发', color: 'orange' },
+  }
+
+  const getStationName = (stationId: string) => {
+    const station = mockStations.find(s => s.id === stationId)
+    return station?.name || '-'
+  }
+
+  const getLastMaintenanceRecord = (equipmentId: string) => {
+    const equipment = equipments.find(e => e.id === equipmentId)
+    if (!equipment?.lastMaintenanceRecordId) return null
+    return maintenanceRecords.find(r => r.id === equipment.lastMaintenanceRecordId) || null
+  }
+
   const columns = [
     {
       title: '所属台站',
       dataIndex: 'stationId',
       key: 'stationId',
-      render: (stationId: string) => {
-        const station = mockStations.find(s => s.id === stationId)
-        return station?.name || '-'
-      },
+      render: (stationId: string) => getStationName(stationId),
     },
     {
       title: '设备名称',
@@ -124,20 +151,111 @@ const DeviceOperation = () => {
     {
       title: '操作',
       key: 'action',
-      width: 80,
+      width: 180,
       render: (_: any, record: Equipment) => (
-        <a onClick={() => handleView(record)}>查看详情</a>
+        <Space size="small">
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => handleViewDetail(record)}
+          >
+            详情
+          </Button>
+          {record.status !== '正常' && (
+            <Button
+              type="primary"
+              size="small"
+              danger
+              icon={<ToolOutlined />}
+              onClick={() => handleInitiateMaintenance(record)}
+            >
+              发起维护
+            </Button>
+          )}
+        </Space>
       ),
     },
   ]
 
-  const handleView = (device: Equipment) => {
+  const handleViewDetail = (device: Equipment) => {
     setCurrentDevice(device)
-    setModalVisible(true)
+    setDetailModalVisible(true)
+  }
+
+  const handleInitiateMaintenance = (device: Equipment) => {
+    setCurrentDevice(device)
+    const station = mockStations.find(s => s.id === device.stationId)
+    form.setFieldsValue({
+      type: '故障维修',
+      stationId: device.stationId,
+      stationName: station?.name || '',
+      equipmentId: device.id,
+      equipmentName: device.name,
+      title: `${device.name}故障维修`,
+      description: `设备状态：${device.status}\n请尽快安排人员进行维修处理。`,
+      handler: '',
+      startTime: dayjs(),
+    })
+    setMaintainModalVisible(true)
+  }
+
+  const handleCreateMaintenance = () => {
+    form.validateFields().then(values => {
+      if (!currentDevice) return
+
+      const startTimeVal = values.startTime as Dayjs | string
+      const formattedStartTime = dayjs.isDayjs(startTimeVal)
+        ? (startTimeVal as Dayjs).format('YYYY-MM-DD HH:mm:ss')
+        : dayjs(startTimeVal).isValid()
+          ? dayjs(startTimeVal).format('YYYY-MM-DD HH:mm:ss')
+          : dayjs().format('YYYY-MM-DD HH:mm:ss')
+
+      const newRecord: MaintenanceRecord = {
+        id: `MR-${String(maintenanceRecords.length + 1).padStart(3, '0')}`,
+        stationId: values.stationId,
+        equipmentId: values.equipmentId,
+        type: values.type,
+        title: values.title,
+        description: values.description,
+        status: '待处理',
+        startTime: formattedStartTime,
+        handler: values.handler,
+        sourceType: 'equipment',
+      }
+
+      setMaintenanceRecords([newRecord, ...maintenanceRecords])
+      setMaintainModalVisible(false)
+      form.resetFields()
+
+      Modal.success({
+        title: '工单创建成功',
+        content: (
+          <div>
+            <p>工单编号：{newRecord.id}</p>
+            <p>工单已创建，请到设备维护模块处理。</p>
+            <Button
+              type="primary"
+              icon={<LinkOutlined />}
+              onClick={() => {
+                Modal.destroyAll()
+                navigate('/device-maintenance')
+              }}
+            >
+              跳转到设备维护
+            </Button>
+          </div>
+        ),
+      })
+    })
   }
 
   const station = currentDevice
     ? mockStations.find(s => s.id === currentDevice.stationId)
+    : null
+
+  const lastMaintenanceRecord = currentDevice
+    ? getLastMaintenanceRecord(currentDevice.id)
     : null
 
   const tempChartOption = {
@@ -180,16 +298,16 @@ const DeviceOperation = () => {
   }
 
   const typeStats = {
-    '测震仪': mockEquipments.filter(e => e.type === '测震仪').length,
-    '强震仪': mockEquipments.filter(e => e.type === '强震仪').length,
-    '数据采集器': mockEquipments.filter(e => e.type === '数据采集器').length,
-    '通信设备': mockEquipments.filter(e => e.type === '通信设备').length,
+    '测震仪': equipments.filter(e => e.type === '测震仪').length,
+    '强震仪': equipments.filter(e => e.type === '强震仪').length,
+    '数据采集器': equipments.filter(e => e.type === '数据采集器').length,
+    '通信设备': equipments.filter(e => e.type === '通信设备').length,
   }
 
   const statusCounts = {
-    normal: mockEquipments.filter(e => e.status === '正常').length,
-    warning: mockEquipments.filter(e => e.status === '警告').length,
-    fault: mockEquipments.filter(e => e.status === '故障' || e.status === '离线').length,
+    normal: equipments.filter(e => e.status === '正常').length,
+    warning: equipments.filter(e => e.status === '警告').length,
+    fault: equipments.filter(e => e.status === '故障' || e.status === '离线').length,
   }
 
   const statusPieOption = {
@@ -212,19 +330,19 @@ const DeviceOperation = () => {
       <Row gutter={[16, 16]}>
         <Col span={6}>
           <Card>
-            <Statistic title="设备总数" value={mockEquipments.length} suffix="台" />
+            <Statistic title="设备总数" value={equipments.length} suffix="台" />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
             <Statistic
               title="运行率"
-              value={(statusCounts.normal / mockEquipments.length * 100).toFixed(1)}
+              value={(statusCounts.normal / equipments.length * 100).toFixed(1)}
               suffix="%"
               valueStyle={{ color: '#52c41a' }}
             />
             <Progress
-              percent={Math.round(statusCounts.normal / mockEquipments.length * 100)}
+              percent={Math.round(statusCounts.normal / equipments.length * 100)}
               showInfo={false}
               strokeColor="#52c41a"
             />
@@ -298,10 +416,11 @@ const DeviceOperation = () => {
 
       <Modal
         title="设备详情"
-        open={modalVisible}
+        open={detailModalVisible}
         width={800}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => setDetailModalVisible(false)}
         footer={null}
+        destroyOnClose
       >
         {currentDevice && (
           <div>
@@ -325,6 +444,36 @@ const DeviceOperation = () => {
               </Descriptions.Item>
               <Descriptions.Item label="当前电压">{currentDevice.voltage?.toFixed(1)}V</Descriptions.Item>
             </Descriptions>
+
+            {lastMaintenanceRecord && (
+              <Card
+                size="small"
+                title="最近维护记录"
+                style={{ marginTop: 16 }}
+                extra={
+                  <Tag color={sourceTypeMap[lastMaintenanceRecord.sourceType || 'manual']?.color || 'default'}>
+                    {sourceTypeMap[lastMaintenanceRecord.sourceType || 'manual']?.text || '手动创建'}
+                  </Tag>
+                }
+              >
+                <Descriptions bordered column={2} size="small">
+                  <Descriptions.Item label="工单编号">{lastMaintenanceRecord.id}</Descriptions.Item>
+                  <Descriptions.Item label="工单类型">
+                    <Tag color="red">{lastMaintenanceRecord.type}</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="维护时间">{lastMaintenanceRecord.startTime}</Descriptions.Item>
+                  <Descriptions.Item label="处理状态">
+                    <Tag color={statusMap[lastMaintenanceRecord.status] || 'default'}>
+                      {lastMaintenanceRecord.status}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="维护结果" span={2}>
+                    {lastMaintenanceRecord.result || '暂无结果'}
+                  </Descriptions.Item>
+                </Descriptions>
+              </Card>
+            )}
+
             <Row gutter={16} style={{ marginTop: 16 }}>
               <Col span={12}>
                 <Card size="small">
@@ -337,6 +486,78 @@ const DeviceOperation = () => {
                 </Card>
               </Col>
             </Row>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        title="发起维护工单"
+        open={maintainModalVisible}
+        width={600}
+        onCancel={() => setMaintainModalVisible(false)}
+        onOk={handleCreateMaintenance}
+        destroyOnClose
+      >
+        {currentDevice && (
+          <div>
+            <Alert
+              message="系统已自动预填工单信息，确认后将创建维护工单"
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+            <Form form={form} layout="vertical" preserve={false}>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item name="type" label="工单类型" rules={[{ required: true, message: '请选择工单类型' }]}>
+                    <Select placeholder="请选择工单类型">
+                      <Option value="日常维护">日常维护</Option>
+                      <Option value="故障维修">故障维修</Option>
+                      <Option value="应急处置">应急处置</Option>
+                      <Option value="升级改造">升级改造</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="stationName" label="所属台站">
+                    <Input disabled />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item name="stationId" label="台站ID" hidden>
+                    <Input />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="equipmentId" label="设备ID" hidden>
+                    <Input />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item name="equipmentName" label="关联设备">
+                <Input disabled />
+              </Form.Item>
+              <Form.Item name="title" label="工单标题" rules={[{ required: true, message: '请输入工单标题' }]}>
+                <Input placeholder="请输入工单标题" />
+              </Form.Item>
+              <Form.Item name="description" label="问题描述" rules={[{ required: true, message: '请输入问题描述' }]}>
+                <TextArea rows={4} placeholder="请详细描述问题" />
+              </Form.Item>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item name="handler" label="处理人" rules={[{ required: true, message: '请输入处理人姓名' }]}>
+                    <Input placeholder="请输入处理人姓名" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="startTime" label="开始时间" rules={[{ required: true, message: '请选择开始时间' }]}>
+                    <DatePicker showTime style={{ width: '100%' }} format="YYYY-MM-DD HH:mm:ss" disabled />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Form>
           </div>
         )}
       </Modal>

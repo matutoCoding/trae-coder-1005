@@ -24,6 +24,7 @@ export interface Equipment {
   manufacturer: string
   installDate: string
   lastMaintenanceDate: string
+  lastMaintenanceRecordId?: string
   status: '正常' | '警告' | '故障' | '离线'
   runTime: number
   temperature?: number
@@ -43,6 +44,7 @@ export interface WaveformData {
   maxAmplitude: number
   minAmplitude: number
   hasEvent: boolean
+  prelimMagnitude?: number
 }
 
 export interface Earthquake {
@@ -55,10 +57,17 @@ export interface Earthquake {
   magnitudeType: string
   occurTime: string
   reportTime: string
-  status: '自动定位' | '人工复核' | '已发布'
+  status: '草稿' | '自动定位' | '人工复核' | '已发布'
   intensity?: string
   affectedPopulation?: number
   stations: string[]
+  sourceType?: 'manual' | 'waveform' | 'auto'
+  sourceWaveformId?: string
+  autoLocateTime?: string
+  reviewTime?: string
+  publishTime?: string
+  meetingRequired?: boolean
+  meetingRecordId?: string
 }
 
 export interface PrecursorData {
@@ -87,6 +96,8 @@ export interface MaintenanceRecord {
   endTime?: string
   handler: string
   result?: string
+  sourceType?: 'manual' | 'equipment'
+  restoreEquipmentStatus?: '恢复正常' | '保留异常' | '仍需观察'
 }
 
 export interface DutySchedule {
@@ -96,6 +107,22 @@ export interface DutySchedule {
   personnel: string[]
   leader: string
   notes?: string
+  handoverRecordId?: string
+}
+
+export interface HandoverRecord {
+  id: string
+  date: string
+  shift: '早班' | '中班' | '晚班'
+  scheduleId: string
+  oncomingPersonnel: string[]
+  outgoingPersonnel: string[]
+  handoverTime: string
+  handoverContent: string
+  abnormalEvents: string
+  handlingResult: string
+  notes?: string
+  operator: string
 }
 
 export interface MeetingRecord {
@@ -107,6 +134,8 @@ export interface MeetingRecord {
   content: string
   conclusions: string
   recorder: string
+  earthquakeId?: string
+  meetingType: '日常会商' | '震情会商' | '紧急会商' | '年度会商'
 }
 
 export interface TransmissionStatus {

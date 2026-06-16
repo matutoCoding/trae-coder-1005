@@ -1,4 +1,4 @@
-import { Card, Row, Col, Statistic, Table, Tag, List, Space } from 'antd'
+import { Card, Row, Col, Statistic, Table, Tag, List, Space, Button, Alert } from 'antd'
 import {
   DatabaseOutlined,
   ToolOutlined,
@@ -7,17 +7,42 @@ import {
   ExclamationCircleOutlined,
   RiseOutlined,
   BellOutlined,
+  TeamOutlined,
+  FileTextOutlined,
+  RightOutlined,
+  AlertOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
-import { mockStations, mockEquipments, mockEarthquakes, mockTransmissionStatus, generateTimeSeriesData, generateHistogramData } from '../mock/data'
+import dayjs from 'dayjs'
+import { useNavigate } from 'react-router-dom'
+import {
+  mockStations,
+  mockEquipments,
+  mockEarthquakes,
+  mockMaintenanceRecords,
+  mockTransmissionStatus,
+  mockDutySchedules,
+  mockMeetingRecords,
+  generateTimeSeriesData,
+  generateHistogramData,
+} from '../mock/data'
 
 const Dashboard = () => {
+  const navigate = useNavigate()
+
   const onlineCount = mockStations.filter(s => s.status === '运行中').length
   const maintenanceCount = mockStations.filter(s => s.status === '维护中').length
   const offlineCount = mockStations.filter(s => s.status === '停用').length
   const normalEquipments = mockEquipments.filter(e => e.status === '正常').length
   const warningEquipments = mockEquipments.filter(e => e.status === '警告').length
   const faultEquipments = mockEquipments.filter(e => e.status === '故障' || e.status === '离线').length
+
+  const pendingMeetings = mockEarthquakes.filter(e => e.status === '已发布' && e.meetingRequired && !e.meetingRecordId)
+  const pendingReview = mockEarthquakes.filter(e => e.status === '自动定位' || e.status === '草稿')
+  const pendingMaintenance = mockMaintenanceRecords.filter(m => m.status === '待处理' || m.status === '处理中')
+  const todaySchedules = mockDutySchedules.filter(s => s.date === dayjs().format('YYYY-MM-DD'))
+  const todayMeetings = mockMeetingRecords.filter(m => dayjs(m.time).isSame(dayjs(), 'day'))
 
   const statusColumn = [
     {
@@ -110,6 +135,16 @@ const Dashboard = () => {
     new Date(b.occurTime).getTime() - new Date(a.occurTime).getTime()
   )
 
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case '已发布': return 'green'
+      case '人工复核': return 'blue'
+      case '自动定位': return 'default'
+      case '草稿': return 'orange'
+      default: return 'default'
+    }
+  }
+
   return (
     <div>
       <Row gutter={[16, 16]}>
@@ -160,19 +195,41 @@ const Dashboard = () => {
         <Col span={6}>
           <Card>
             <Statistic
-              title="待处理告警"
-              value={3}
+              title="待办事项"
+              value={pendingMeetings.length + pendingReview.length + pendingMaintenance.length}
               prefix={<BellOutlined />}
-              suffix="条"
+              suffix="项"
               valueStyle={{ color: '#ff4d4f' }}
             />
             <div style={{ marginTop: 12 }}>
-              <Tag color="red">紧急 1</Tag>
-              <Tag color="orange">重要 2</Tag>
+              <Tag color="red">待会商 {pendingMeetings.length}</Tag>
+              <Tag color="orange">待复核 {pendingReview.length}</Tag>
+              <Tag color="blue">待维护 {pendingMaintenance.length}</Tag>
             </div>
           </Card>
         </Col>
       </Row>
+
+      {pendingMeetings.length > 0 && (
+        <Alert
+          message={
+            <Space>
+              <AlertOutlined style={{ color: '#faad14' }} />
+              <span>
+                有 <b style={{ color: '#faad14' }}>{pendingMeetings.length}</b> 条已发布地震需要召开震情会商会，请及时处理
+              </span>
+            </Space>
+          }
+          type="warning"
+          showIcon
+          style={{ marginTop: 16 }}
+          action={
+            <Button size="small" type="primary" onClick={() => navigate('/earthquake-analysis')}>
+              去处理 <RightOutlined />
+            </Button>
+          }
+        />
+      )}
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col span={16}>
@@ -187,11 +244,22 @@ const Dashboard = () => {
           </Card>
         </Col>
         <Col span={8}>
-          <Card title="最近地震" size="small">
+          <Card
+            title="最近地震"
+            size="small"
+            extra={
+              <Button type="link" size="small" onClick={() => navigate('/earthquake-report')}>
+                查看全部 <RightOutlined />
+              </Button>
+            }
+          >
             <List
-              dataSource={recentEarthquakes}
+              dataSource={recentEarthquakes.slice(0, 5)}
               renderItem={(item) => (
-                <List.Item>
+                <List.Item
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => navigate('/earthquake-report')}
+                >
                   <List.Item.Meta
                     title={
                       <Space>
@@ -201,14 +269,199 @@ const Dashboard = () => {
                         </Tag>
                       </Space>
                     }
-                    description={item.occurTime}
+                    description={dayjs(item.occurTime).format('YYYY-MM-DD HH:mm:ss')}
                   />
-                  <Tag color={
-                    item.status === '已发布' ? 'green' :
-                    item.status === '人工复核' ? 'blue' : 'default'
-                  }>
+                  <Tag color={getStatusColor(item.status)}>
                     {item.status}
                   </Tag>
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col span={12}>
+          <Card
+            title={
+              <Space>
+                <ClockCircleOutlined />
+                <span>速报联动事项</span>
+              </Space>
+            }
+            size="small"
+            extra={
+              <Button type="link" size="small" onClick={() => navigate('/earthquake-report')}>
+                地震速报 <RightOutlined />
+              </Button>
+            }
+          >
+            <List
+              size="small"
+              dataSource={pendingReview.slice(0, 5)}
+              locale={{ emptyText: '暂无待处理速报' }}
+              renderItem={(item) => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <Tag color="orange">待{item.status === '草稿' ? '完善' : '复核'}</Tag>
+                        <span>{item.location}</span>
+                        <Tag color={item.magnitude >= 4 ? 'red' : 'default'}>M{item.magnitude}</Tag>
+                      </Space>
+                    }
+                    description={
+                      <Space size="small">
+                        <span style={{ color: '#999' }}>发震：</span>
+                        <span>{dayjs(item.occurTime).format('MM-DD HH:mm')}</span>
+                      </Space>
+                    }
+                  />
+                  <Button type="link" size="small" onClick={() => navigate('/earthquake-report')}>
+                    处理
+                  </Button>
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card
+            title={
+              <Space>
+                <FileTextOutlined />
+                <span>设备维护待办</span>
+              </Space>
+            }
+            size="small"
+            extra={
+              <Button type="link" size="small" onClick={() => navigate('/device-maintenance')}>
+                设备维护 <RightOutlined />
+              </Button>
+            }
+          >
+            <List
+              size="small"
+              dataSource={pendingMaintenance.slice(0, 5)}
+              locale={{ emptyText: '暂无待办工单' }}
+              renderItem={(item) => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <Tag color={item.status === '待处理' ? 'orange' : 'blue'}>{item.status}</Tag>
+                        <span>{item.title}</span>
+                      </Space>
+                    }
+                    description={
+                      <Space size="small">
+                        <span style={{ color: '#999' }}>类型：</span>
+                        <span>{item.type}</span>
+                        <span style={{ color: '#999' }}>处理人：</span>
+                        <span>{item.handler}</span>
+                      </Space>
+                    }
+                  />
+                  <Button type="link" size="small" onClick={() => navigate('/device-maintenance')}>
+                    查看
+                  </Button>
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col span={12}>
+          <Card
+            title={
+              <Space>
+                <TeamOutlined />
+                <span>今日值班</span>
+              </Space>
+            }
+            size="small"
+            extra={
+              <Button type="link" size="small" onClick={() => navigate('/duty-management')}>
+                值班管理 <RightOutlined />
+              </Button>
+            }
+          >
+            <List
+              size="small"
+              dataSource={todaySchedules}
+              locale={{ emptyText: '暂无今日排班' }}
+              renderItem={(item) => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <Tag color={
+                          item.shift === '早班' ? 'blue' :
+                          item.shift === '中班' ? 'orange' : 'purple'
+                        }>{item.shift}</Tag>
+                        <span>值班人员：{item.personnel.join('、')}</span>
+                      </Space>
+                    }
+                    description={
+                      <Space size="small">
+                        <span style={{ color: '#999' }}>带班：</span>
+                        <span>{item.leader}</span>
+                      </Space>
+                    }
+                  />
+                  {item.handoverRecordId ? (
+                    <Tag color="green">已交接</Tag>
+                  ) : (
+                    <Tag color="orange">待交接</Tag>
+                  )}
+                </List.Item>
+              )}
+            />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card
+            title={
+              <Space>
+                <FileTextOutlined />
+                <span>震情会商动态</span>
+              </Space>
+            }
+            size="small"
+            extra={
+              <Button type="link" size="small" onClick={() => navigate('/earthquake-analysis')}>
+                震情分析 <RightOutlined />
+              </Button>
+            }
+          >
+            <List
+              size="small"
+              dataSource={[...mockMeetingRecords].sort((a, b) =>
+                dayjs(b.time).valueOf() - dayjs(a.time).valueOf()
+              ).slice(0, 5)}
+              renderItem={(item) => (
+                <List.Item style={{ cursor: 'pointer' }} onClick={() => navigate('/earthquake-analysis')}>
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <Tag color={
+                          item.meetingType === '紧急会商' ? 'red' :
+                          item.meetingType === '震情会商' ? 'blue' :
+                          item.meetingType === '日常会商' ? 'green' : 'purple'
+                        }>
+                          {item.meetingType}
+                        </Tag>
+                        <span>{item.title}</span>
+                      </Space>
+                    }
+                    description={dayjs(item.time).format('YYYY-MM-DD HH:mm')}
+                  />
+                  {item.earthquakeId && (
+                    <Tag color="orange">关联地震</Tag>
+                  )}
                 </List.Item>
               )}
             />

@@ -30,7 +30,7 @@ import {
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
-import type { MaintenanceRecord } from '../types'
+import type { MaintenanceRecord, Equipment } from '../types'
 import { mockMaintenanceRecords, mockStations, mockEquipments } from '../mock/data'
 
 const { Option } = Select
@@ -40,12 +40,16 @@ const { TabPane } = Tabs
 
 const DeviceMaintenance = () => {
   const [records, setRecords] = useState<MaintenanceRecord[]>(mockMaintenanceRecords)
+  const [equipments, setEquipments] = useState<Equipment[]>(mockEquipments)
   const [filterType, setFilterType] = useState<string>('')
   const [filterStatus, setFilterStatus] = useState<string>('')
   const [modalType, setModalType] = useState<'view' | 'add' | 'process'>('view')
   const [modalVisible, setModalVisible] = useState(false)
   const [currentRecord, setCurrentRecord] = useState<MaintenanceRecord | null>(null)
+  const [selectedStationId, setSelectedStationId] = useState<string>('')
+  const [processStatus, setProcessStatus] = useState<string>('')
   const [form] = Form.useForm()
+  const [processForm] = Form.useForm()
 
   const statusMap: Record<string, { color: string; icon: any }> = {
     '待处理': { color: 'default', icon: <ClockCircleOutlined /> },
@@ -60,11 +64,43 @@ const DeviceMaintenance = () => {
     '升级改造': 'purple',
   }
 
+  const sourceTypeMap: Record<string, { text: string; color: string }> = {
+    'manual': { text: '手动创建', color: 'blue' },
+    'equipment': { text: '设备触发', color: 'orange' },
+  }
+
+  const equipmentStatusMap: Record<string, string> = {
+    '正常': 'green',
+    '警告': 'orange',
+    '故障': 'red',
+    '离线': 'default',
+  }
+
   const formatDateTime = (val: string | undefined | null) => {
     if (!val) return '-'
     const d = dayjs(val)
     return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : val
   }
+
+  const getStationName = (stationId: string) => {
+    const station = mockStations.find(s => s.id === stationId)
+    return station?.name || stationId
+  }
+
+  const getEquipmentName = (equipmentId?: string) => {
+    if (!equipmentId) return '-'
+    const equipment = equipments.find(e => e.id === equipmentId)
+    return equipment?.name || equipmentId
+  }
+
+  const getEquipment = (equipmentId?: string) => {
+    if (!equipmentId) return null
+    return equipments.find(e => e.id === equipmentId) || null
+  }
+
+  const filteredEquipmentsByStation = selectedStationId
+    ? equipments.filter(e => e.stationId === selectedStationId)
+    : equipments
 
   const columns = [
     {
@@ -81,6 +117,16 @@ const DeviceMaintenance = () => {
       render: (type: string) => <Tag color={typeMap[type]}>{type}</Tag>,
     },
     {
+      title: '来源',
+      dataIndex: 'sourceType',
+      key: 'sourceType',
+      width: 110,
+      render: (sourceType?: string) => {
+        const s = sourceTypeMap[sourceType || 'manual']
+        return <Tag color={s.color}>{s.text}</Tag>
+      },
+    },
+    {
       title: '标题',
       dataIndex: 'title',
       key: 'title',
@@ -89,20 +135,13 @@ const DeviceMaintenance = () => {
       title: '所属台站',
       dataIndex: 'stationId',
       key: 'stationId',
-      render: (id: string) => {
-        const station = mockStations.find(s => s.id === id)
-        return station?.name || id
-      },
+      render: (id: string) => getStationName(id),
     },
     {
       title: '关联设备',
       dataIndex: 'equipmentId',
       key: 'equipmentId',
-      render: (id?: string) => {
-        if (!id) return '-'
-        const equipment = mockEquipments.find(e => e.id === id)
-        return equipment?.name || id
-      },
+      render: (id?: string) => getEquipmentName(id),
     },
     {
       title: '处理人',
@@ -142,6 +181,7 @@ const DeviceMaintenance = () => {
       title: '操作',
       key: 'action',
       width: 150,
+      fixed: 'right' as const,
       render: (_: any, record: MaintenanceRecord) => (
         <Space size="small">
           <Button
@@ -175,53 +215,109 @@ const DeviceMaintenance = () => {
 
   const handleAdd = () => {
     setCurrentRecord(null)
+    setSelectedStationId('')
     setModalType('add')
     form.resetFields()
+    form.setFieldsValue({
+      sourceType: 'manual',
+      startTime: dayjs(),
+    })
     setModalVisible(true)
   }
 
   const handleProcess = (record: MaintenanceRecord) => {
     setCurrentRecord(record)
     setModalType('process')
-    form.resetFields()
+    const initialStatus = record.status === '待处理' ? '处理中' : '已完成'
+    setProcessStatus(initialStatus)
+    processForm.resetFields()
+    processForm.setFieldsValue({
+      status: initialStatus,
+      restoreEquipmentStatus: '恢复正常',
+    })
     setModalVisible(true)
   }
 
-  const handleSubmit = () => {
-    form.validateFields().then(values => {
-      if (modalType === 'add') {
-        const startTimeVal = values.startTime as Dayjs | string
-        const formattedStartTime = dayjs.isDayjs(startTimeVal)
-          ? (startTimeVal as Dayjs).format('YYYY-MM-DD HH:mm:ss')
-          : dayjs(startTimeVal).isValid()
-            ? dayjs(startTimeVal).format('YYYY-MM-DD HH:mm:ss')
-            : dayjs().format('YYYY-MM-DD HH:mm:ss')
+  const handleProcessStatusChange = (value: string) => {
+    setProcessStatus(value)
+  }
 
-        const newRecord: MaintenanceRecord = {
-          ...values,
-          startTime: formattedStartTime,
-          id: `MR-${String(records.length + 1).padStart(3, '0')}`,
-          status: '待处理' as const,
-        }
-        setRecords([newRecord, ...records])
-        message.success('工单创建成功')
-      } else if (modalType === 'process' && currentRecord) {
-        const nowStr = dayjs().format('YYYY-MM-DD HH:mm:ss')
-        const isCompleted = values.status === '已完成'
-        setRecords(records.map(r =>
-          r.id === currentRecord.id
-            ? {
-                ...r,
-                status: values.status || (currentRecord.status === '待处理' ? '处理中' as const : '已完成' as const),
-                result: values.result || r.result,
-                endTime: isCompleted ? nowStr : r.endTime,
-              }
-            : r
-        ))
-        message.success('处理记录已更新')
+  const handleSubmitAdd = () => {
+    form.validateFields().then(values => {
+      const startTimeVal = values.startTime as Dayjs | string
+      const formattedStartTime = dayjs.isDayjs(startTimeVal)
+        ? (startTimeVal as Dayjs).format('YYYY-MM-DD HH:mm:ss')
+        : dayjs(startTimeVal).isValid()
+          ? dayjs(startTimeVal).format('YYYY-MM-DD HH:mm:ss')
+          : dayjs().format('YYYY-MM-DD HH:mm:ss')
+
+      const newRecord: MaintenanceRecord = {
+        ...values,
+        startTime: formattedStartTime,
+        id: `MR-${String(records.length + 1).padStart(3, '0')}`,
+        status: '待处理' as const,
+        equipmentId: values.equipmentId || undefined,
       }
+      setRecords([newRecord, ...records])
+      message.success('工单创建成功')
       setModalVisible(false)
     })
+  }
+
+  const handleSubmitProcess = () => {
+    processForm.validateFields().then(values => {
+      if (!currentRecord) return
+
+      const nowStr = dayjs().format('YYYY-MM-DD HH:mm:ss')
+      const isCompleted = values.status === '已完成'
+      const restoreStatus = values.restoreEquipmentStatus as '恢复正常' | '保留异常' | '仍需观察' | undefined
+
+      setRecords(records.map(r =>
+        r.id === currentRecord.id
+          ? {
+              ...r,
+              status: values.status || (currentRecord.status === '待处理' ? '处理中' as const : '已完成' as const),
+              result: values.result || r.result,
+              endTime: isCompleted ? nowStr : r.endTime,
+              restoreEquipmentStatus: isCompleted ? restoreStatus : undefined,
+            }
+          : r
+      ))
+
+      if (isCompleted && currentRecord.equipmentId) {
+        const equipmentId = currentRecord.equipmentId
+        setEquipments(prevEquipments =>
+          prevEquipments.map(e => {
+            if (e.id !== equipmentId) return e
+
+            let newStatus = e.status
+            if (restoreStatus === '恢复正常') {
+              newStatus = '正常'
+            } else if (restoreStatus === '仍需观察') {
+              newStatus = '警告'
+            }
+
+            return {
+              ...e,
+              status: newStatus,
+              lastMaintenanceDate: nowStr,
+              lastMaintenanceRecordId: currentRecord.id,
+            }
+          })
+        )
+      }
+
+      message.success('处理记录已更新')
+      setModalVisible(false)
+    })
+  }
+
+  const handleSubmit = () => {
+    if (modalType === 'add') {
+      handleSubmitAdd()
+    } else if (modalType === 'process') {
+      handleSubmitProcess()
+    }
   }
 
   const filteredRecords = records.filter(r => {
@@ -234,7 +330,7 @@ const DeviceMaintenance = () => {
     ? mockStations.find(s => s.id === currentRecord.stationId)
     : null
   const equipment = currentRecord?.equipmentId
-    ? mockEquipments.find(e => e.id === currentRecord.equipmentId)
+    ? getEquipment(currentRecord.equipmentId)
     : null
 
   const typeStats = {
@@ -297,6 +393,11 @@ const DeviceMaintenance = () => {
       ],
       label: { show: true, formatter: '{b}: {c}次' },
     }],
+  }
+
+  const handleStationChange = (value: string) => {
+    setSelectedStationId(value)
+    form.setFieldsValue({ equipmentId: undefined })
   }
 
   return (
@@ -365,7 +466,7 @@ const DeviceMaintenance = () => {
               columns={columns}
               dataSource={filteredRecords}
               rowKey="id"
-              scroll={{ x: 1400 }}
+              scroll={{ x: 1500 }}
             />
           </TabPane>
 
@@ -448,7 +549,7 @@ const DeviceMaintenance = () => {
           modalType === 'add' ? '新建工单' : '处理工单'
         }
         open={modalVisible}
-        width={750}
+        width={modalType === 'view' ? 800 : 750}
         onCancel={() => setModalVisible(false)}
         onOk={modalType !== 'view' ? handleSubmit : undefined}
         footer={modalType === 'view' ? null : undefined}
@@ -461,6 +562,11 @@ const DeviceMaintenance = () => {
               <Descriptions.Item label="工单类型">
                 <Tag color={typeMap[currentRecord.type]}>{currentRecord.type}</Tag>
               </Descriptions.Item>
+              <Descriptions.Item label="来源">
+                <Tag color={sourceTypeMap[currentRecord.sourceType || 'manual'].color}>
+                  {sourceTypeMap[currentRecord.sourceType || 'manual'].text}
+                </Tag>
+              </Descriptions.Item>
               <Descriptions.Item label="状态">
                 <Tag color={statusMap[currentRecord.status].color}>{currentRecord.status}</Tag>
               </Descriptions.Item>
@@ -469,6 +575,11 @@ const DeviceMaintenance = () => {
               <Descriptions.Item label="处理人">{currentRecord.handler || '-'}</Descriptions.Item>
               <Descriptions.Item label="开始时间">{formatDateTime(currentRecord.startTime)}</Descriptions.Item>
               <Descriptions.Item label="结束时间">{formatDateTime(currentRecord.endTime)}</Descriptions.Item>
+              {currentRecord.restoreEquipmentStatus && (
+                <Descriptions.Item label="设备状态处理">
+                  {currentRecord.restoreEquipmentStatus}
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="标题" span={2}>{currentRecord.title}</Descriptions.Item>
               <Descriptions.Item label="问题描述" span={2}>
                 {currentRecord.description}
@@ -479,6 +590,27 @@ const DeviceMaintenance = () => {
                 </Descriptions.Item>
               )}
             </Descriptions>
+
+            {equipment && (
+              <Card
+                size="small"
+                title="关联设备信息"
+                style={{ marginTop: 16 }}
+              >
+                <Descriptions bordered column={2} size="small">
+                  <Descriptions.Item label="设备名称">{equipment.name}</Descriptions.Item>
+                  <Descriptions.Item label="设备类型">{equipment.type}</Descriptions.Item>
+                  <Descriptions.Item label="设备型号">{equipment.model}</Descriptions.Item>
+                  <Descriptions.Item label="当前状态">
+                    <Tag color={equipmentStatusMap[equipment.status]}>{equipment.status}</Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="所属台站">{station?.name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="生产厂商">{equipment.manufacturer}</Descriptions.Item>
+                  <Descriptions.Item label="上次维护">{equipment.lastMaintenanceDate}</Descriptions.Item>
+                  <Descriptions.Item label="运行时间">{equipment.runTime.toLocaleString()}小时</Descriptions.Item>
+                </Descriptions>
+              </Card>
+            )}
 
             {currentRecord.type === '应急处置' && (
               <Card title="处置时间线" size="small" style={{ marginTop: 16 }}>
@@ -554,19 +686,38 @@ const DeviceMaintenance = () => {
               </Descriptions.Item>
             </Descriptions>
 
-            <Form form={form} layout="vertical" preserve={false}>
+            <Form form={processForm} layout="vertical" preserve={false}>
               <Form.Item
                 name="status"
                 label="处理状态"
                 rules={[{ required: true, message: '请选择处理状态' }]}
               >
-                <Select placeholder="请选择处理状态">
+                <Select
+                  placeholder="请选择处理状态"
+                  onChange={handleProcessStatusChange}
+                >
                   {currentRecord.status === '待处理' && (
                     <Option value="处理中">处理中（正在处理）</Option>
                   )}
                   <Option value="已完成">已完成（处理完毕）</Option>
                 </Select>
               </Form.Item>
+
+              {processStatus === '已完成' && currentRecord.equipmentId && (
+                <Form.Item
+                  name="restoreEquipmentStatus"
+                  label="设备状态处理"
+                  rules={[{ required: true, message: '请选择设备状态处理方式' }]}
+                  extra="工单完成后，将同步更新设备状态"
+                >
+                  <Select placeholder="请选择设备状态处理方式">
+                    <Option value="恢复正常">恢复正常（设备状态更新为"正常"）</Option>
+                    <Option value="保留异常">保留异常（设备状态保持不变）</Option>
+                    <Option value="仍需观察">仍需观察（设备状态更新为"警告"）</Option>
+                  </Select>
+                </Form.Item>
+              )}
+
               <Form.Item
                 name="result"
                 label="处理结果"
@@ -578,16 +729,28 @@ const DeviceMaintenance = () => {
           </div>
         ) : (
           <Form form={form} layout="vertical" preserve={false}>
-            <Form.Item name="type" label="工单类型" rules={[{ required: true, message: '请选择工单类型' }]}>
-              <Select placeholder="请选择工单类型">
-                <Option value="日常维护">日常维护</Option>
-                <Option value="故障维修">故障维修</Option>
-                <Option value="应急处置">应急处置</Option>
-                <Option value="升级改造">升级改造</Option>
-              </Select>
-            </Form.Item>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="type" label="工单类型" rules={[{ required: true, message: '请选择工单类型' }]}>
+                  <Select placeholder="请选择工单类型">
+                    <Option value="日常维护">日常维护</Option>
+                    <Option value="故障维修">故障维修</Option>
+                    <Option value="应急处置">应急处置</Option>
+                    <Option value="升级改造">升级改造</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="sourceType" label="来源类型" rules={[{ required: true, message: '请选择来源类型' }]}>
+                  <Select placeholder="请选择来源类型">
+                    <Option value="manual">手动创建</Option>
+                    <Option value="equipment">设备触发</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+            </Row>
             <Form.Item name="stationId" label="所属台站" rules={[{ required: true, message: '请选择台站' }]}>
-              <Select placeholder="请选择台站">
+              <Select placeholder="请选择台站" onChange={handleStationChange}>
                 {mockStations.map(s => (
                   <Option key={s.id} value={s.id}>{s.name}</Option>
                 ))}
@@ -595,8 +758,10 @@ const DeviceMaintenance = () => {
             </Form.Item>
             <Form.Item name="equipmentId" label="关联设备">
               <Select placeholder="请选择设备（可选）" allowClear>
-                {mockEquipments.map(e => (
-                  <Option key={e.id} value={e.id}>{e.name}</Option>
+                {filteredEquipmentsByStation.map(e => (
+                  <Option key={e.id} value={e.id}>
+                    {e.name} ({e.model})
+                  </Option>
                 ))}
               </Select>
             </Form.Item>
@@ -606,12 +771,18 @@ const DeviceMaintenance = () => {
             <Form.Item name="description" label="问题描述" rules={[{ required: true, message: '请输入问题描述' }]}>
               <TextArea rows={3} placeholder="请详细描述问题，包括现象、发生时间、影响范围等" />
             </Form.Item>
-            <Form.Item name="handler" label="处理人" rules={[{ required: true, message: '请输入处理人姓名' }]}>
-              <Input placeholder="请输入处理人姓名" />
-            </Form.Item>
-            <Form.Item name="startTime" label="开始时间" rules={[{ required: true, message: '请选择开始时间' }]}>
-              <DatePicker showTime style={{ width: '100%' }} format="YYYY-MM-DD HH:mm:ss" placeholder="请选择开始时间" />
-            </Form.Item>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="handler" label="处理人" rules={[{ required: true, message: '请输入处理人姓名' }]}>
+                  <Input placeholder="请输入处理人姓名" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="startTime" label="开始时间" rules={[{ required: true, message: '请选择开始时间' }]}>
+                  <DatePicker showTime style={{ width: '100%' }} format="YYYY-MM-DD HH:mm:ss" placeholder="请选择开始时间" />
+                </Form.Item>
+              </Col>
+            </Row>
           </Form>
         )}
       </Modal>
