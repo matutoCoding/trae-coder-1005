@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Card,
   Table,
@@ -46,6 +47,7 @@ const sourceTypeMap: Record<string, { label: string; color: string }> = {
 }
 
 const EarthquakeReport = () => {
+  const navigate = useNavigate()
   const { earthquakes, stations, waveformData, addEarthquake, updateEarthquake } = useApp()
   const [modalType, setModalType] = useState<'view' | 'add' | 'review'>('view')
   const [modalVisible, setModalVisible] = useState(false)
@@ -70,10 +72,14 @@ const EarthquakeReport = () => {
     return dayjs(val).isValid() ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : val
   }
 
+  const getWaveform = (waveformId: string | undefined) => {
+    if (!waveformId) return null
+    return waveformData.find(w => w.id === waveformId) || null
+  }
+
   const getWaveformName = (waveformId: string | undefined) => {
-    if (!waveformId) return '-'
-    const wf = waveformData.find(w => w.id === waveformId)
-    return wf ? `${wf.stationName} - ${wf.channel}` : waveformId
+    const wf = getWaveform(waveformId)
+    return wf ? `${wf.stationName} - ${wf.channel}` : '-'
   }
 
   const columns = [
@@ -279,10 +285,10 @@ const EarthquakeReport = () => {
           depth: typeof values.depth === 'number' ? values.depth : currentEq.depth,
           intensity: values.intensity || currentEq.intensity,
           affectedPopulation: values.affectedPopulation || currentEq.affectedPopulation,
+          stations: values.stations && values.stations.length > 0 ? values.stations : currentEq.stations,
           status: newStatus,
           reviewTime: saveAsDraft ? undefined : reviewTime,
           reportTime: reviewTime,
-          sourceType: 'manual',
         })
         message.success(saveAsDraft ? '已保存为草稿' : '复核完成')
       }
@@ -295,7 +301,7 @@ const EarthquakeReport = () => {
       title: '跳转会商记录',
       content: '是否跳转到震情分析页面查看会商记录？',
       onOk: () => {
-        window.location.href = '/earthquake-analysis'
+        navigate('/earthquake-analysis')
       },
     })
   }
@@ -368,7 +374,7 @@ const EarthquakeReport = () => {
           showIcon
           style={{ marginBottom: 16 }}
           action={
-            <Button size="small" type="primary" onClick={() => window.location.href = '/earthquake-analysis'}>
+            <Button size="small" type="primary" onClick={() => navigate('/earthquake-analysis')}>
               去处理
             </Button>
           }
@@ -560,6 +566,19 @@ const EarthquakeReport = () => {
               <Descriptions.Item label="关联波形">
                 {getWaveformName(currentEq.sourceWaveformId)}
               </Descriptions.Item>
+              {getWaveform(currentEq.sourceWaveformId) && (
+                <>
+                  <Descriptions.Item label="来源台站">
+                    {getWaveform(currentEq.sourceWaveformId)?.stationName}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="波形通道">
+                    {getWaveform(currentEq.sourceWaveformId)?.channel}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="波形时间段" span={2}>
+                    {formatDateTime(getWaveform(currentEq.sourceWaveformId)?.startTime)} ~ {formatDateTime(getWaveform(currentEq.sourceWaveformId)?.endTime)}
+                  </Descriptions.Item>
+                </>
+              )}
               <Descriptions.Item label="是否需要会商">
                 <Tag color={currentEq.meetingRequired ? 'red' : 'default'}>
                   {currentEq.meetingRequired ? '是' : '否'}
@@ -647,10 +666,28 @@ const EarthquakeReport = () => {
             </Card>
           </div>
         ) : (
-          <Form form={form} layout="vertical">
-            <Form.Item name="location" label="发震地点" rules={[{ required: true, message: '请输入发震地点' }]}>
-              <Input placeholder="请输入发震地点" />
-            </Form.Item>
+          <div>
+            {modalType === 'review' && currentEq?.sourceType === 'waveform' && (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={
+                  <Space>
+                    <Tag color="purple">波形触发</Tag>
+                    <span>
+                      来源台站：<b>{getWaveform(currentEq.sourceWaveformId)?.stationName}</b>
+                      ，通道：<b>{getWaveform(currentEq.sourceWaveformId)?.channel}</b>
+                      ，时间段：<b>{formatDateTime(getWaveform(currentEq.sourceWaveformId)?.startTime)} ~ {formatDateTime(getWaveform(currentEq.sourceWaveformId)?.endTime)}</b>
+                    </span>
+                  </Space>
+                }
+              />
+            )}
+            <Form form={form} layout="vertical" preserve={false}>
+              <Form.Item name="location" label="发震地点" rules={[{ required: true, message: '请输入发震地点' }]}>
+                <Input placeholder="请输入发震地点" />
+              </Form.Item>
             <Row gutter={16}>
               <Col span={12}>
                 <Form.Item name="magnitude" label="震级" rules={[{ required: true, message: '请输入震级' }]}>
@@ -709,6 +746,7 @@ const EarthquakeReport = () => {
               </>
             )}
           </Form>
+          </div>
         )}
       </Modal>
     </div>

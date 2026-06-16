@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Card,
   Table,
@@ -52,6 +53,7 @@ const statusMap: Record<string, string> = {
 }
 
 const WaveformData = () => {
+  const navigate = useNavigate()
   const { waveformData, earthquakes, stations, addEarthquake } = useApp()
   const [selectedStation, setSelectedStation] = useState<string>('')
   const [selectedWaveform, setSelectedWaveform] = useState<WaveformData | null>(waveformData[0] ?? null)
@@ -207,7 +209,7 @@ const WaveformData = () => {
         okText: '前往地震速报',
         cancelText: '留在当前页',
         onOk: () => {
-          window.location.href = '/earthquake-report'
+          navigate('/earthquake-report')
         },
       })
     })
@@ -248,7 +250,7 @@ const WaveformData = () => {
       ),
       okText: '前往地震速报页面',
       onOk: () => {
-        window.location.href = '/earthquake-report'
+        navigate('/earthquake-report')
       },
     })
   }

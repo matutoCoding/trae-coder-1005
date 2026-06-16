@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Card,
   Table,
@@ -48,6 +49,7 @@ const meetingTypeColorMap: Record<string, string> = {
 }
 
 const EarthquakeAnalysis = () => {
+  const navigate = useNavigate()
   const { earthquakes, meetingRecords, stations, addMeetingRecord, updateMeetingRecord } = useApp()
   const [selectedType, setSelectedType] = useState<string>('')
   const [selectedStation, setSelectedStation] = useState<string>('')
@@ -148,7 +150,7 @@ const EarthquakeAnalysis = () => {
       title: '跳转地震速报',
       content: '是否跳转到地震速报页面查看详情？',
       onOk: () => {
-        window.location.href = '/earthquake-report'
+        navigate('/earthquake-report')
       },
     })
   }

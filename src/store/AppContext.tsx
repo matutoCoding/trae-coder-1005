@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react'
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react'
 import type {
   Station,
   Equipment,
@@ -21,6 +21,50 @@ import {
   mockMeetingRecords,
   mockTransmissionStatus,
 } from '../mock/data'
+
+const STORAGE_KEY = 'seismic-station-data-v1'
+
+interface PersistedStateShape {
+  equipments: Equipment[]
+  waveformData: WaveformData[]
+  earthquakes: Earthquake[]
+  maintenanceRecords: MaintenanceRecord[]
+  dutySchedules: DutySchedule[]
+  handoverRecords: HandoverRecord[]
+  meetingRecords: MeetingRecord[]
+}
+
+const defaultPersisted: PersistedStateShape = {
+  equipments: mockEquipments,
+  waveformData: mockWaveformData,
+  earthquakes: mockEarthquakes,
+  maintenanceRecords: mockMaintenanceRecords,
+  dutySchedules: mockDutySchedules,
+  handoverRecords: mockHandoverRecords,
+  meetingRecords: mockMeetingRecords,
+}
+
+const loadPersisted = (): PersistedStateShape => {
+  try {
+    if (typeof window === 'undefined') return defaultPersisted
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) return defaultPersisted
+    const parsed = JSON.parse(raw)
+    return { ...defaultPersisted, ...parsed }
+  } catch {
+    return defaultPersisted
+  }
+}
+
+const savePersisted = (state: PersistedStateShape) => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    }
+  } catch {
+    /* ignore */
+  }
+}
 
 interface AppState {
   stations: Station[]
@@ -53,20 +97,44 @@ interface AppContextType extends AppState {
   updateMeetingRecord: (id: string, updates: Partial<MeetingRecord>) => void
   addDutySchedule: (schedule: DutySchedule) => void
   updateDutySchedule: (id: string, updates: Partial<DutySchedule>) => void
+  resetAllData: () => void
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
+  const initial = loadPersisted()
   const [stations] = useState<Station[]>(mockStations)
-  const [equipments, setEquipments] = useState<Equipment[]>(mockEquipments)
-  const [waveformData, setWaveformData] = useState<WaveformData[]>(mockWaveformData)
-  const [earthquakes, setEarthquakes] = useState<Earthquake[]>(mockEarthquakes)
-  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(mockMaintenanceRecords)
-  const [dutySchedules, setDutySchedules] = useState<DutySchedule[]>(mockDutySchedules)
-  const [handoverRecords, setHandoverRecords] = useState<HandoverRecord[]>(mockHandoverRecords)
-  const [meetingRecords, setMeetingRecords] = useState<MeetingRecord[]>(mockMeetingRecords)
+  const [equipments, setEquipments] = useState<Equipment[]>(initial.equipments)
+  const [waveformData, setWaveformData] = useState<WaveformData[]>(initial.waveformData)
+  const [earthquakes, setEarthquakes] = useState<Earthquake[]>(initial.earthquakes)
+  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>(initial.maintenanceRecords)
+  const [dutySchedules, setDutySchedules] = useState<DutySchedule[]>(initial.dutySchedules)
+  const [handoverRecords, setHandoverRecords] = useState<HandoverRecord[]>(initial.handoverRecords)
+  const [meetingRecords, setMeetingRecords] = useState<MeetingRecord[]>(initial.meetingRecords)
   const [transmissionStatus] = useState<TransmissionStatus[]>(mockTransmissionStatus)
+
+  useEffect(() => {
+    savePersisted({
+      equipments,
+      waveformData,
+      earthquakes,
+      maintenanceRecords,
+      dutySchedules,
+      handoverRecords,
+      meetingRecords,
+    })
+  }, [equipments, waveformData, earthquakes, maintenanceRecords, dutySchedules, handoverRecords, meetingRecords])
+
+  const resetAllData = useCallback(() => {
+    setEquipments(mockEquipments)
+    setWaveformData(mockWaveformData)
+    setEarthquakes(mockEarthquakes)
+    setMaintenanceRecords(mockMaintenanceRecords)
+    setDutySchedules(mockDutySchedules)
+    setHandoverRecords(mockHandoverRecords)
+    setMeetingRecords(mockMeetingRecords)
+  }, [])
 
   const addMaintenanceRecord = useCallback((record: MaintenanceRecord) => {
     setMaintenanceRecords(prev => [record, ...prev])
@@ -150,6 +218,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     updateMeetingRecord,
     addDutySchedule,
     updateDutySchedule,
+    resetAllData,
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
