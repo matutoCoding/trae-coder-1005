@@ -15,7 +15,6 @@ import {
   Statistic,
   Descriptions,
   Tabs,
-  List,
   Calendar,
   Badge,
   message,
@@ -28,9 +27,9 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import type { Dayjs } from 'dayjs'
 import type { DutySchedule, MeetingRecord } from '../types'
-import { mockDutySchedules, mockMeetingRecords
-} from '../mock/data'
+import { mockDutySchedules, mockMeetingRecords } from '../mock/data'
 
 const { Option } = Select
 const { TextArea } = Input
@@ -60,12 +59,25 @@ const DutyManagement = () => {
     '晚班': '00:00 - 08:00',
   }
 
+  const formatDate = (val: string | undefined | null) => {
+    if (!val) return '-'
+    const d = dayjs(val)
+    return d.isValid() ? d.format('YYYY-MM-DD') : val
+  }
+
+  const formatDateTime = (val: string | undefined | null) => {
+    if (!val) return '-'
+    const d = dayjs(val)
+    return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : val
+  }
+
   const scheduleColumns = [
     {
       title: '日期',
       dataIndex: 'date',
       key: 'date',
       width: 120,
+      render: (val: string) => formatDate(val),
     },
     {
       title: '班次',
@@ -140,6 +152,7 @@ const DutyManagement = () => {
       dataIndex: 'time',
       key: 'time',
       width: 170,
+      render: (val: string) => formatDateTime(val),
     },
     {
       title: '地点',
@@ -208,7 +221,10 @@ const DutyManagement = () => {
   const handleEditSchedule = (schedule: DutySchedule) => {
     setCurrentSchedule(schedule)
     setScheduleModalType('edit')
-    scheduleForm.setFieldsValue(schedule)
+    scheduleForm.setFieldsValue({
+      ...schedule,
+      date: dayjs(schedule.date),
+    })
     setScheduleModalVisible(true)
   }
 
@@ -225,16 +241,30 @@ const DutyManagement = () => {
 
   const handleScheduleSubmit = () => {
     scheduleForm.validateFields().then(values => {
+      const dateVal = values.date as Dayjs | string
+      const formattedDate = dayjs.isDayjs(dateVal)
+        ? (dateVal as Dayjs).format('YYYY-MM-DD')
+        : dayjs(dateVal).isValid()
+          ? dayjs(dateVal).format('YYYY-MM-DD')
+          : dayjs().format('YYYY-MM-DD')
+
+      const submitData: DutySchedule = {
+        ...values,
+        date: formattedDate,
+      }
+
       if (scheduleModalType === 'add') {
         const newSchedule: DutySchedule = {
-          ...values,
+          ...submitData,
           id: `DS-${String(schedules.length + 1).padStart(3, '0')}`,
         }
         setSchedules([...schedules, newSchedule])
         message.success('排班创建成功')
       } else if (scheduleModalType === 'edit' && currentSchedule) {
         setSchedules(schedules.map(s =>
-          s.id === currentSchedule.id ? { ...s, ...values } : s
+          s.id === currentSchedule.id
+            ? { ...s, ...submitData, id: s.id }
+            : s
         ))
         message.success('排班更新成功')
       }
@@ -244,8 +274,16 @@ const DutyManagement = () => {
 
   const handleMeetingSubmit = () => {
     meetingForm.validateFields().then(values => {
+      const timeVal = values.time as Dayjs | string
+      const formattedTime = dayjs.isDayjs(timeVal)
+        ? (timeVal as Dayjs).format('YYYY-MM-DD HH:mm:ss')
+        : dayjs(timeVal).isValid()
+          ? dayjs(timeVal).format('YYYY-MM-DD HH:mm:ss')
+          : dayjs().format('YYYY-MM-DD HH:mm:ss')
+
       const newMeeting: MeetingRecord = {
         ...values,
+        time: formattedTime,
         id: `MT-${String(meetings.length + 1).padStart(3, '0')}`,
       }
       setMeetings([newMeeting, ...meetings])
@@ -254,21 +292,24 @@ const DutyManagement = () => {
     })
   }
 
-  const getListData = (value: any) => {
+  const getListData = (value: Dayjs) => {
     const dateStr = value.format('YYYY-MM-DD')
-    const daySchedules = schedules.filter(s => s.date === dateStr)
+    const daySchedules = schedules.filter(s => {
+      const sDate = dayjs(s.date).format('YYYY-MM-DD')
+      return sDate === dateStr
+    })
     return daySchedules.map(s => ({
       type: s.shift === '早班' ? 'success' : s.shift === '中班' ? 'processing' : 'warning',
       content: `${s.shift}: ${s.personnel.join(', ')}`,
     }))
   }
 
-  const dateCellRender = (value: any) => {
+  const dateCellRender = (value: Dayjs) => {
     const listData = getListData(value)
     return (
-      <ul className="events">
+      <ul className="events" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
         {listData.map((item, i) => (
-          <li key={i}>
+          <li key={i} style={{ lineHeight: 1.8 }}>
             <Badge status={item.type as any} text={item.content} />
           </li>
         ))}
@@ -276,7 +317,9 @@ const DutyManagement = () => {
     )
   }
 
-  const todaySchedule = schedules.filter(s => s.date === dayjs().format('YYYY-MM-DD'))
+  const todaySchedule = schedules.filter(
+    s => dayjs(s.date).format('YYYY-MM-DD') === dayjs().format('YYYY-MM-DD')
+  )
 
   return (
     <div>
@@ -389,11 +432,12 @@ const DutyManagement = () => {
         onCancel={() => setScheduleModalVisible(false)}
         onOk={scheduleModalType !== 'view' ? handleScheduleSubmit : undefined}
         footer={scheduleModalType === 'view' ? null : undefined}
+        destroyOnClose
       >
         {scheduleModalType === 'view' && currentSchedule ? (
           <div>
             <Descriptions bordered column={2} size="small">
-              <Descriptions.Item label="日期">{currentSchedule.date}</Descriptions.Item>
+              <Descriptions.Item label="日期">{formatDate(currentSchedule.date)}</Descriptions.Item>
               <Descriptions.Item label="班次">
                 <Tag color={shiftColorMap[currentSchedule.shift]}>
                   {currentSchedule.shift}
@@ -414,25 +458,25 @@ const DutyManagement = () => {
             </Descriptions>
           </div>
         ) : (
-          <Form form={scheduleForm} layout="vertical">
-            <Form.Item name="date" label="日期" rules={[{ required: true }]}>
-              <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />
+          <Form form={scheduleForm} layout="vertical" preserve={false}>
+            <Form.Item name="date" label="日期" rules={[{ required: true, message: '请选择日期' }]}>
+              <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" placeholder="请选择日期" />
             </Form.Item>
-            <Form.Item name="shift" label="班次" rules={[{ required: true }]}>
+            <Form.Item name="shift" label="班次" rules={[{ required: true, message: '请选择班次' }]}>
               <Select placeholder="请选择班次">
                 <Option value="早班">早班 (08:00 - 16:00)</Option>
                 <Option value="中班">中班 (16:00 - 00:00)</Option>
                 <Option value="晚班">晚班 (00:00 - 08:00)</Option>
               </Select>
             </Form.Item>
-            <Form.Item name="personnel" label="值班人员" rules={[{ required: true }]}>
+            <Form.Item name="personnel" label="值班人员" rules={[{ required: true, message: '请选择值班人员' }]}>
               <Select mode="multiple" placeholder="请选择值班人员">
                 {['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十'].map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
             </Form.Item>
-            <Form.Item name="leader" label="带班领导" rules={[{ required: true }]}>
+            <Form.Item name="leader" label="带班领导" rules={[{ required: true, message: '请选择带班领导' }]}>
               <Select placeholder="请选择带班领导">
                 {['张三', '李四', '王五', '赵六', '钱七'].map(p => (
                   <Option key={p} value={p}>{p}</Option>
@@ -447,19 +491,20 @@ const DutyManagement = () => {
       </Modal>
 
       <Modal
-        title="会议记录详情"
+        title={currentMeeting ? '会议记录详情' : '新建会议'}
         open={meetingModalVisible}
         width={800}
         onCancel={() => setMeetingModalVisible(false)}
         footer={currentMeeting ? null : (
           <Button type="primary" onClick={handleMeetingSubmit}>保存</Button>
         )}
+        destroyOnClose
       >
         {currentMeeting ? (
           <div>
             <Descriptions bordered column={2} size="small">
               <Descriptions.Item label="会议标题">{currentMeeting.title}</Descriptions.Item>
-              <Descriptions.Item label="时间">{currentMeeting.time}</Descriptions.Item>
+              <Descriptions.Item label="时间">{formatDateTime(currentMeeting.time)}</Descriptions.Item>
               <Descriptions.Item label="地点">{currentMeeting.location}</Descriptions.Item>
               <Descriptions.Item label="记录人">{currentMeeting.recorder}</Descriptions.Item>
               <Descriptions.Item label="参会人员" span={2}>
@@ -478,40 +523,40 @@ const DutyManagement = () => {
             </Card>
           </div>
         ) : (
-          <Form form={meetingForm} layout="vertical">
-            <Form.Item name="title" label="会议标题" rules={[{ required: true }]}>
+          <Form form={meetingForm} layout="vertical" preserve={false}>
+            <Form.Item name="title" label="会议标题" rules={[{ required: true, message: '请输入会议标题' }]}>
               <Input placeholder="请输入会议标题" />
             </Form.Item>
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="time" label="时间" rules={[{ required: true }]}>
-                  <DatePicker showTime style={{ width: '100%' }} />
+                <Form.Item name="time" label="时间" rules={[{ required: true, message: '请选择时间' }]}>
+                  <DatePicker showTime style={{ width: '100%' }} format="YYYY-MM-DD HH:mm:ss" placeholder="请选择时间" />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="location" label="地点" rules={[{ required: true }]}>
+                <Form.Item name="location" label="地点" rules={[{ required: true, message: '请输入会议地点' }]}>
                   <Input placeholder="请输入会议地点" />
                 </Form.Item>
               </Col>
             </Row>
-            <Form.Item name="participants" label="参会人员" rules={[{ required: true }]}>
+            <Form.Item name="participants" label="参会人员" rules={[{ required: true, message: '请选择参会人员' }]}>
               <Select mode="multiple" placeholder="请选择参会人员">
                 {['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十'].map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
             </Form.Item>
-            <Form.Item name="recorder" label="记录人" rules={[{ required: true }]}>
+            <Form.Item name="recorder" label="记录人" rules={[{ required: true, message: '请选择记录人' }]}>
               <Select placeholder="请选择记录人">
                 {['张三', '李四', '王五', '赵六', '钱七'].map(p => (
                   <Option key={p} value={p}>{p}</Option>
                 ))}
               </Select>
             </Form.Item>
-            <Form.Item name="content" label="会议内容" rules={[{ required: true }]}>
+            <Form.Item name="content" label="会议内容" rules={[{ required: true, message: '请输入会议内容' }]}>
               <TextArea rows={4} placeholder="请输入会议内容" />
             </Form.Item>
-            <Form.Item name="conclusions" label="会议结论" rules={[{ required: true }]}>
+            <Form.Item name="conclusions" label="会议结论" rules={[{ required: true, message: '请输入会议结论' }]}>
               <TextArea rows={3} placeholder="请输入会议结论" />
             </Form.Item>
           </Form>

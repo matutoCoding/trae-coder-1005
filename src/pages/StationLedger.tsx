@@ -13,8 +13,11 @@ import {
   Descriptions,
   Row,
   Col,
+  DatePicker,
 } from 'antd'
 import { PlusOutlined, EditOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons'
+import dayjs from 'dayjs'
+import type { Dayjs } from 'dayjs'
 import type { Station } from '../types'
 import { mockStations, mockEquipments } from '../mock/data'
 
@@ -27,6 +30,12 @@ const StationLedger = () => {
   const [modalVisible, setModalVisible] = useState(false)
   const [currentStation, setCurrentStation] = useState<Station | null>(null)
   const [form] = Form.useForm()
+
+  const formatDate = (val: string | undefined | null) => {
+    if (!val) return '-'
+    const d = dayjs(val)
+    return d.isValid() ? d.format('YYYY-MM-DD') : val
+  }
 
   const columns = [
     {
@@ -66,7 +75,8 @@ const StationLedger = () => {
       width: 180,
       render: (_: any, record: Station) => (
         <span>
-          {record.longitude.toFixed(4)}°E, {record.latitude.toFixed(4)}°N
+          {typeof record.longitude === 'number' ? record.longitude.toFixed(4) : '-'}°E,{' '}
+          {typeof record.latitude === 'number' ? record.latitude.toFixed(4) : '-'}°N
         </span>
       ),
     },
@@ -75,7 +85,7 @@ const StationLedger = () => {
       dataIndex: 'altitude',
       key: 'altitude',
       width: 100,
-      render: (val: number) => val.toFixed(1),
+      render: (val: number) => (typeof val === 'number' ? val.toFixed(1) : '-'),
     },
     {
       title: '状态',
@@ -90,6 +100,13 @@ const StationLedger = () => {
         }
         return <Tag color={colorMap[status]}>{status}</Tag>
       },
+    },
+    {
+      title: '建设日期',
+      dataIndex: 'constructionDate',
+      key: 'constructionDate',
+      width: 120,
+      render: (val: string) => formatDate(val),
     },
     {
       title: '联系人',
@@ -107,7 +124,7 @@ const StationLedger = () => {
       title: '操作',
       key: 'action',
       width: 180,
-      fixed: 'right',
+      fixed: 'right' as const,
       render: (_: any, record: Station) => (
         <Space size="small">
           <Button
@@ -156,7 +173,10 @@ const StationLedger = () => {
   const handleEdit = (station: Station) => {
     setCurrentStation(station)
     setModalType('edit')
-    form.setFieldsValue(station)
+    form.setFieldsValue({
+      ...station,
+      constructionDate: dayjs(station.constructionDate),
+    })
     setModalVisible(true)
   }
 
@@ -172,16 +192,30 @@ const StationLedger = () => {
 
   const handleSubmit = () => {
     form.validateFields().then(values => {
+      const dateVal = values.constructionDate as Dayjs | string
+      const formattedDate = dayjs.isDayjs(dateVal)
+        ? (dateVal as Dayjs).format('YYYY-MM-DD')
+        : dayjs(dateVal).isValid()
+          ? dayjs(dateVal).format('YYYY-MM-DD')
+          : dayjs().format('YYYY-MM-DD')
+
+      const submitData = {
+        ...values,
+        constructionDate: formattedDate,
+      }
+
       if (modalType === 'add') {
         const newStation: Station = {
-          ...values,
+          ...submitData,
           id: `ST-${String(stations.length + 1).padStart(3, '0')}`,
           equipment: [],
         }
         setStations([...stations, newStation])
       } else if (modalType === 'edit' && currentStation) {
         setStations(stations.map(s =>
-          s.id === currentStation.id ? { ...s, ...values } : s
+          s.id === currentStation.id
+            ? { ...s, ...submitData, id: s.id, equipment: s.equipment }
+            : s
         ))
       }
       setModalVisible(false)
@@ -206,7 +240,7 @@ const StationLedger = () => {
           columns={columns}
           dataSource={stations}
           rowKey="id"
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1400 }}
         />
       </Card>
 
@@ -220,6 +254,7 @@ const StationLedger = () => {
         onCancel={() => setModalVisible(false)}
         onOk={modalType !== 'view' ? handleSubmit : undefined}
         footer={modalType === 'view' ? null : undefined}
+        destroyOnClose
       >
         {modalType === 'view' && currentStation ? (
           <div>
@@ -233,13 +268,19 @@ const StationLedger = () => {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="位置">{currentStation.location}</Descriptions.Item>
-              <Descriptions.Item label="海拔">{currentStation.altitude.toFixed(1)}m</Descriptions.Item>
-              <Descriptions.Item label="经度">{currentStation.longitude.toFixed(6)}°E</Descriptions.Item>
-              <Descriptions.Item label="纬度">{currentStation.latitude.toFixed(6)}°N</Descriptions.Item>
-              <Descriptions.Item label="建设日期">{currentStation.constructionDate}</Descriptions.Item>
+              <Descriptions.Item label="海拔">
+                {typeof currentStation.altitude === 'number' ? `${currentStation.altitude.toFixed(1)}m` : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="经度">
+                {typeof currentStation.longitude === 'number' ? `${currentStation.longitude.toFixed(6)}°E` : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="纬度">
+                {typeof currentStation.latitude === 'number' ? `${currentStation.latitude.toFixed(6)}°N` : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="建设日期">{formatDate(currentStation.constructionDate)}</Descriptions.Item>
               <Descriptions.Item label="联系人">{currentStation.contact}</Descriptions.Item>
               <Descriptions.Item label="联系电话">{currentStation.phone}</Descriptions.Item>
-              <Descriptions.Item label="台站描述" span={2}>{currentStation.description}</Descriptions.Item>
+              <Descriptions.Item label="台站描述" span={2}>{currentStation.description || '-'}</Descriptions.Item>
             </Descriptions>
 
             <Card title="关联设备" size="small" style={{ marginTop: 16 }}>
@@ -266,22 +307,22 @@ const StationLedger = () => {
             </Card>
           </div>
         ) : (
-          <Form form={form} layout="vertical">
+          <Form form={form} layout="vertical" preserve={false}>
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="code" label="台站编码" rules={[{ required: true }]}>
+                <Form.Item name="code" label="台站编码" rules={[{ required: true, message: '请输入台站编码' }]}>
                   <Input placeholder="请输入台站编码" />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="name" label="台站名称" rules={[{ required: true }]}>
+                <Form.Item name="name" label="台站名称" rules={[{ required: true, message: '请输入台站名称' }]}>
                   <Input placeholder="请输入台站名称" />
                 </Form.Item>
               </Col>
             </Row>
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="type" label="台站类型" rules={[{ required: true }]}>
+                <Form.Item name="type" label="台站类型" rules={[{ required: true, message: '请选择台站类型' }]}>
                   <Select placeholder="请选择台站类型">
                     <Option value="测震台">测震台</Option>
                     <Option value="强震台">强震台</Option>
@@ -290,7 +331,7 @@ const StationLedger = () => {
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="status" label="状态" rules={[{ required: true }]}>
+                <Form.Item name="status" label="状态" rules={[{ required: true, message: '请选择状态' }]}>
                   <Select placeholder="请选择状态">
                     <Option value="运行中">运行中</Option>
                     <Option value="维护中">维护中</Option>
@@ -299,39 +340,39 @@ const StationLedger = () => {
                 </Form.Item>
               </Col>
             </Row>
-            <Form.Item name="location" label="位置" rules={[{ required: true }]}>
+            <Form.Item name="location" label="位置" rules={[{ required: true, message: '请输入详细地址' }]}>
               <Input placeholder="请输入详细地址" />
             </Form.Item>
             <Row gutter={16}>
               <Col span={8}>
-                <Form.Item name="longitude" label="经度" rules={[{ required: true }]}>
+                <Form.Item name="longitude" label="经度" rules={[{ required: true, message: '请输入经度' }]}>
                   <InputNumber style={{ width: '100%' }} placeholder="经度" min={73} max={135} step={0.0001} />
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="latitude" label="纬度" rules={[{ required: true }]}>
+                <Form.Item name="latitude" label="纬度" rules={[{ required: true, message: '请输入纬度' }]}>
                   <InputNumber style={{ width: '100%' }} placeholder="纬度" min={3} max={54} step={0.0001} />
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="altitude" label="海拔(m)" rules={[{ required: true }]}>
+                <Form.Item name="altitude" label="海拔(m)" rules={[{ required: true, message: '请输入海拔' }]}>
                   <InputNumber style={{ width: '100%' }} placeholder="海拔" step={0.1} />
                 </Form.Item>
               </Col>
             </Row>
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="constructionDate" label="建设日期" rules={[{ required: true }]}>
-                  <Input type="date" />
+                <Form.Item name="constructionDate" label="建设日期" rules={[{ required: true, message: '请选择建设日期' }]}>
+                  <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" placeholder="请选择建设日期" />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="contact" label="联系人" rules={[{ required: true }]}>
+                <Form.Item name="contact" label="联系人" rules={[{ required: true, message: '请输入联系人' }]}>
                   <Input placeholder="联系人姓名" />
                 </Form.Item>
               </Col>
             </Row>
-            <Form.Item name="phone" label="联系电话" rules={[{ required: true }]}>
+            <Form.Item name="phone" label="联系电话" rules={[{ required: true, message: '请输入联系电话' }]}>
               <Input placeholder="联系电话" />
             </Form.Item>
             <Form.Item name="description" label="台站描述">

@@ -23,15 +23,15 @@ import {
   PlusOutlined,
   EyeOutlined,
   CheckCircleOutlined,
-  WarningOutlined,
   ExclamationCircleOutlined,
   ClockCircleOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
+import type { Dayjs } from 'dayjs'
 import type { MaintenanceRecord } from '../types'
-import { mockMaintenanceRecords, mockStations, mockEquipments
-} from '../mock/data'
+import { mockMaintenanceRecords, mockStations, mockEquipments } from '../mock/data'
 
 const { Option } = Select
 const { TextArea } = Input
@@ -58,6 +58,12 @@ const DeviceMaintenance = () => {
     '故障维修': 'red',
     '应急处置': 'orange',
     '升级改造': 'purple',
+  }
+
+  const formatDateTime = (val: string | undefined | null) => {
+    if (!val) return '-'
+    const d = dayjs(val)
+    return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : val
   }
 
   const columns = [
@@ -109,12 +115,20 @@ const DeviceMaintenance = () => {
       dataIndex: 'startTime',
       key: 'startTime',
       width: 170,
+      render: (val: string) => formatDateTime(val),
+    },
+    {
+      title: '结束时间',
+      dataIndex: 'endTime',
+      key: 'endTime',
+      width: 170,
+      render: (val?: string) => formatDateTime(val),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 110,
       render: (status: string) => {
         const s = statusMap[status]
         return (
@@ -127,7 +141,7 @@ const DeviceMaintenance = () => {
     {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 150,
       render: (_: any, record: MaintenanceRecord) => (
         <Space size="small">
           <Button
@@ -140,9 +154,9 @@ const DeviceMaintenance = () => {
           </Button>
           {record.status !== '已完成' && (
             <Button
-              type="link"
-              size="small"
               type="primary"
+              size="small"
+              icon={<SettingOutlined />}
               onClick={() => handleProcess(record)}
             >
               处理
@@ -176,21 +190,31 @@ const DeviceMaintenance = () => {
   const handleSubmit = () => {
     form.validateFields().then(values => {
       if (modalType === 'add') {
+        const startTimeVal = values.startTime as Dayjs | string
+        const formattedStartTime = dayjs.isDayjs(startTimeVal)
+          ? (startTimeVal as Dayjs).format('YYYY-MM-DD HH:mm:ss')
+          : dayjs(startTimeVal).isValid()
+            ? dayjs(startTimeVal).format('YYYY-MM-DD HH:mm:ss')
+            : dayjs().format('YYYY-MM-DD HH:mm:ss')
+
         const newRecord: MaintenanceRecord = {
           ...values,
+          startTime: formattedStartTime,
           id: `MR-${String(records.length + 1).padStart(3, '0')}`,
           status: '待处理' as const,
         }
         setRecords([newRecord, ...records])
         message.success('工单创建成功')
       } else if (modalType === 'process' && currentRecord) {
+        const nowStr = dayjs().format('YYYY-MM-DD HH:mm:ss')
+        const isCompleted = values.status === '已完成'
         setRecords(records.map(r =>
           r.id === currentRecord.id
             ? {
                 ...r,
-                ...values,
                 status: values.status || (currentRecord.status === '待处理' ? '处理中' as const : '已完成' as const),
-                endTime: values.status === '已完成' ? dayjs().format('YYYY-MM-DD HH:mm:ss') : undefined,
+                result: values.result || r.result,
+                endTime: isCompleted ? nowStr : r.endTime,
               }
             : r
         ))
@@ -341,7 +365,7 @@ const DeviceMaintenance = () => {
               columns={columns}
               dataSource={filteredRecords}
               rowKey="id"
-              scroll={{ x: 1200 }}
+              scroll={{ x: 1400 }}
             />
           </TabPane>
 
@@ -424,10 +448,11 @@ const DeviceMaintenance = () => {
           modalType === 'add' ? '新建工单' : '处理工单'
         }
         open={modalVisible}
-        width={700}
+        width={750}
         onCancel={() => setModalVisible(false)}
         onOk={modalType !== 'view' ? handleSubmit : undefined}
         footer={modalType === 'view' ? null : undefined}
+        destroyOnClose
       >
         {modalType === 'view' && currentRecord ? (
           <div>
@@ -439,11 +464,11 @@ const DeviceMaintenance = () => {
               <Descriptions.Item label="状态">
                 <Tag color={statusMap[currentRecord.status].color}>{currentRecord.status}</Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="所属台站">{station?.name}</Descriptions.Item>
+              <Descriptions.Item label="所属台站">{station?.name || '-'}</Descriptions.Item>
               <Descriptions.Item label="关联设备">{equipment?.name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="处理人">{currentRecord.handler}</Descriptions.Item>
-              <Descriptions.Item label="开始时间">{currentRecord.startTime}</Descriptions.Item>
-              <Descriptions.Item label="结束时间">{currentRecord.endTime || '-'}</Descriptions.Item>
+              <Descriptions.Item label="处理人">{currentRecord.handler || '-'}</Descriptions.Item>
+              <Descriptions.Item label="开始时间">{formatDateTime(currentRecord.startTime)}</Descriptions.Item>
+              <Descriptions.Item label="结束时间">{formatDateTime(currentRecord.endTime)}</Descriptions.Item>
               <Descriptions.Item label="标题" span={2}>{currentRecord.title}</Descriptions.Item>
               <Descriptions.Item label="问题描述" span={2}>
                 {currentRecord.description}
@@ -461,37 +486,107 @@ const DeviceMaintenance = () => {
                   items={[
                     {
                       color: 'red',
-                      children: `故障发生 - ${currentRecord.startTime}`,
+                      children: (
+                        <div>
+                          <div style={{ fontWeight: 'bold' }}>故障发生</div>
+                          <div style={{ color: '#666', fontSize: 12 }}>时间：{formatDateTime(currentRecord.startTime)}</div>
+                        </div>
+                      ),
                     },
                     {
                       color: 'orange',
-                      children: `工单创建 - ${currentRecord.startTime}`,
+                      children: (
+                        <div>
+                          <div style={{ fontWeight: 'bold' }}>工单创建</div>
+                          <div style={{ color: '#666', fontSize: 12 }}>时间：{formatDateTime(currentRecord.startTime)}</div>
+                        </div>
+                      ),
                     },
                     currentRecord.endTime
                       ? {
                           color: 'green',
-                          children: `处置完成 - ${currentRecord.endTime}`,
+                          children: (
+                            <div>
+                              <div style={{ fontWeight: 'bold' }}>处置完成</div>
+                              <div style={{ color: '#666', fontSize: 12 }}>时间：{formatDateTime(currentRecord.endTime)}</div>
+                              {currentRecord.result && (
+                                <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
+                                  结果：{currentRecord.result}
+                                </div>
+                              )}
+                            </div>
+                          ),
                         }
                       : {
                           color: 'blue',
-                          children: '处置中...',
+                          children: (
+                            <div>
+                              <div style={{ fontWeight: 'bold' }}>处置中...</div>
+                              <div style={{ color: '#666', fontSize: 12 }}>正在处理，请耐心等待</div>
+                            </div>
+                          ),
                         },
                   ]}
                 />
               </Card>
             )}
           </div>
+        ) : modalType === 'process' && currentRecord ? (
+          <div>
+            <Alert
+              message="原有工单信息（仅需填写处理状态和处理结果）"
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+            <Descriptions bordered column={2} size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="工单编号">{currentRecord.id}</Descriptions.Item>
+              <Descriptions.Item label="工单类型">
+                <Tag color={typeMap[currentRecord.type]}>{currentRecord.type}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="所属台站">{station?.name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="关联设备">{equipment?.name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="处理人">{currentRecord.handler || '-'}</Descriptions.Item>
+              <Descriptions.Item label="创建时间">{formatDateTime(currentRecord.startTime)}</Descriptions.Item>
+              <Descriptions.Item label="标题" span={2}>{currentRecord.title}</Descriptions.Item>
+              <Descriptions.Item label="问题描述" span={2}>
+                {currentRecord.description}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Form form={form} layout="vertical" preserve={false}>
+              <Form.Item
+                name="status"
+                label="处理状态"
+                rules={[{ required: true, message: '请选择处理状态' }]}
+              >
+                <Select placeholder="请选择处理状态">
+                  {currentRecord.status === '待处理' && (
+                    <Option value="处理中">处理中（正在处理）</Option>
+                  )}
+                  <Option value="已完成">已完成（处理完毕）</Option>
+                </Select>
+              </Form.Item>
+              <Form.Item
+                name="result"
+                label="处理结果"
+                rules={[{ required: true, message: '请填写处理结果' }]}
+              >
+                <TextArea rows={4} placeholder="请详细填写处理过程和结果，包括故障原因、修复措施、验证情况等" />
+              </Form.Item>
+            </Form>
+          </div>
         ) : (
-          <Form form={form} layout="vertical">
-            <Form.Item name="type" label="工单类型" rules={[{ required: true }]}>
-              <Select>
+          <Form form={form} layout="vertical" preserve={false}>
+            <Form.Item name="type" label="工单类型" rules={[{ required: true, message: '请选择工单类型' }]}>
+              <Select placeholder="请选择工单类型">
                 <Option value="日常维护">日常维护</Option>
                 <Option value="故障维修">故障维修</Option>
                 <Option value="应急处置">应急处置</Option>
                 <Option value="升级改造">升级改造</Option>
               </Select>
             </Form.Item>
-            <Form.Item name="stationId" label="所属台站" rules={[{ required: true }]}>
+            <Form.Item name="stationId" label="所属台站" rules={[{ required: true, message: '请选择台站' }]}>
               <Select placeholder="请选择台站">
                 {mockStations.map(s => (
                   <Option key={s.id} value={s.id}>{s.name}</Option>
@@ -499,39 +594,24 @@ const DeviceMaintenance = () => {
               </Select>
             </Form.Item>
             <Form.Item name="equipmentId" label="关联设备">
-              <Select placeholder="请选择设备（可选）">
+              <Select placeholder="请选择设备（可选）" allowClear>
                 {mockEquipments.map(e => (
                   <Option key={e.id} value={e.id}>{e.name}</Option>
                 ))}
               </Select>
             </Form.Item>
-            <Form.Item name="title" label="标题" rules={[{ required: true }]}>
-              <Input placeholder="请输入工单标题" />
+            <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入工单标题' }]}>
+              <Input placeholder="请输入工单标题，简要说明问题" />
             </Form.Item>
-            <Form.Item name="description" label="问题描述" rules={[{ required: true }]}>
-              <TextArea rows={3} placeholder="请详细描述问题" />
+            <Form.Item name="description" label="问题描述" rules={[{ required: true, message: '请输入问题描述' }]}>
+              <TextArea rows={3} placeholder="请详细描述问题，包括现象、发生时间、影响范围等" />
             </Form.Item>
-            <Form.Item name="handler" label="处理人" rules={[{ required: true }]}>
+            <Form.Item name="handler" label="处理人" rules={[{ required: true, message: '请输入处理人姓名' }]}>
               <Input placeholder="请输入处理人姓名" />
             </Form.Item>
-            <Form.Item name="startTime" label="开始时间" rules={[{ required: true }]}>
-              <DatePicker showTime style={{ width: '100%' }} />
+            <Form.Item name="startTime" label="开始时间" rules={[{ required: true, message: '请选择开始时间' }]}>
+              <DatePicker showTime style={{ width: '100%' }} format="YYYY-MM-DD HH:mm:ss" placeholder="请选择开始时间" />
             </Form.Item>
-            {modalType === 'process' && (
-              <>
-                <Form.Item name="status" label="更新状态">
-                  <Select placeholder="请选择状态">
-                    {currentRecord?.status === '待处理' && (
-                      <Option value="处理中">处理中</Option>
-                    )}
-                    <Option value="已完成">已完成</Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item name="result" label="处理结果">
-                  <TextArea rows={3} placeholder="请填写处理结果" />
-                </Form.Item>
-              </>
-            )}
           </Form>
         )}
       </Modal>
